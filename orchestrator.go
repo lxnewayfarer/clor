@@ -124,6 +124,7 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 	o.mu.Lock()
 	o.logStreams[nodeID] = logStream
 	o.mu.Unlock()
+	o.watchLogStream(nodeID, logStream)
 
 	o.setStatus(nodeID, "running", "Working...")
 
@@ -177,6 +178,7 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 			ns.RetryAttempt = attempt
 			o.statuses[nodeID] = ns
 			o.mu.Unlock()
+			o.watchLogStream(nodeID, logStream)
 			o.setStatus(nodeID, "running", fmt.Sprintf("Retry %d/%d running...", attempt, maxRetries))
 		}
 
@@ -210,7 +212,10 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 
 	// Clean up log stream
 	o.mu.Lock()
-	delete(o.logStreams, nodeID)
+	if ls, ok := o.logStreams[nodeID]; ok {
+		ls.Close()
+		delete(o.logStreams, nodeID)
+	}
 	o.mu.Unlock()
 
 	// Review loop: auto-detect reviewer by label, target is upstream node
@@ -254,7 +259,10 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 				deliverFile(workdir, art.File, art.DeliverTo, o.projects, o.sharedDir)
 			}
 			o.mu.Lock()
-			delete(o.logStreams, nodeID)
+			if ls, ok := o.logStreams[nodeID]; ok {
+				ls.Close()
+				delete(o.logStreams, nodeID)
+			}
 			o.mu.Unlock()
 			o.setStatus(nodeID, "done", "Complete (no subtasks found)")
 		}
@@ -316,7 +324,10 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 
 	// Clean up
 	o.mu.Lock()
-	delete(o.logStreams, nodeID)
+	if ls, ok := o.logStreams[nodeID]; ok {
+		ls.Close()
+		delete(o.logStreams, nodeID)
+	}
 	ns := o.statuses[nodeID]
 	ns.SubtaskIndex = total
 	ns.SubtaskTotal = total
@@ -425,6 +436,7 @@ func (o *Orchestrator) handleReviewLoop(ctx context.Context, reviewerID string, 
 		o.mu.Lock()
 		o.logStreams[reviewerID] = logStream
 		o.mu.Unlock()
+		o.watchLogStream(reviewerID, logStream)
 
 		prompt := o.expandPromptForNode(reviewerID, reviewer.Config.Prompt, reviewWorkdir)
 		model := reviewer.Config.Model
@@ -441,7 +453,10 @@ func (o *Orchestrator) handleReviewLoop(ctx context.Context, reviewerID string, 
 		os.WriteFile(filepath.Join(o.logsDir, reviewerID+".log"), []byte(result2), 0644)
 
 		o.mu.Lock()
-		delete(o.logStreams, reviewerID)
+		if ls, ok := o.logStreams[reviewerID]; ok {
+			ls.Close()
+			delete(o.logStreams, reviewerID)
+		}
 		o.mu.Unlock()
 	}
 
@@ -693,6 +708,41 @@ func (o *Orchestrator) broadcast() {
 
 func contextWithCancel() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
+}
+
+// watchLogStream starts a goroutine that reads chunks from ls and updates
+// NodeStatus.Message with the last non-empty output line for nodeID.
+// The goroutine exits when ls is closed.
+func (o *Orchestrator) watchLogStream(nodeID string, ls *LogStream) {
+	go func() {
+		ch := ls.Subscribe()
+		for chunk := range ch {
+			line := lastNonEmptyLine(chunk)
+			if line == "" {
+				continue
+			}
+			o.mu.Lock()
+			ns := o.statuses[nodeID]
+			if ns.Status == "running" {
+				ns.Message = line
+				o.statuses[nodeID] = ns
+				o.broadcast()
+			}
+			o.mu.Unlock()
+		}
+	}()
+}
+
+// lastNonEmptyLine returns the last non-empty line from s.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func generateID() string {

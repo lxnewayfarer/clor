@@ -1,0 +1,6 @@
+Clean build. The implementation is complete:
+
+- Added `watchLogStream(nodeID, ls)` method to `Orchestrator` — starts a goroutine that subscribes to a `LogStream`, reads chunks, extracts the last non-empty line via `lastNonEmptyLine()`, and updates `NodeStatus.Message` + calls `broadcast()` whenever the node is `running`
+- Added `Close()` to `LogStream` — closes all subscriber channels so watchers exit cleanly
+- Called `watchLogStream` after each logStream creation (initial run, retries, review loop re-runs)
+- Updated all `delete(o.logStreams, ...)` sites to call `ls.Close()` first, terminating the watcher goroutines

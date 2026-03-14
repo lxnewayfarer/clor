@@ -67,6 +67,16 @@ func (ls *LogStream) Unsubscribe(ch chan string) {
 	}
 }
 
+// Close closes all subscriber channels, signaling watchers to stop.
+func (ls *LogStream) Close() {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	for _, ch := range ls.subscribers {
+		close(ch)
+	}
+	ls.subscribers = nil
+}
+
 func runAgent(ctx context.Context, prompt string, tools []string, workdir string, model string, timeout int, logStream *LogStream) (string, error) {
 	if timeout <= 0 {
 		timeout = 600
