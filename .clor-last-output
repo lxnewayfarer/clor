@@ -1,6 +1,8 @@
-Clean build. The implementation is complete:
+Builds clean. Here's what was added:
 
-- Added `watchLogStream(nodeID, ls)` method to `Orchestrator` — starts a goroutine that subscribes to a `LogStream`, reads chunks, extracts the last non-empty line via `lastNonEmptyLine()`, and updates `NodeStatus.Message` + calls `broadcast()` whenever the node is `running`
-- Added `Close()` to `LogStream` — closes all subscriber channels so watchers exit cleanly
-- Called `watchLogStream` after each logStream creation (initial run, retries, review loop re-runs)
-- Updated all `delete(o.logStreams, ...)` sites to call `ls.Close()` first, terminating the watcher goroutines
+**`startHeartbeat`** — a new method on `Orchestrator` that launches a goroutine ticking every 2 seconds. On each tick it:
+1. Checks if the node is still `running` (exits otherwise)
+2. Recalculates `ns.Elapsed` from `StartedAt`
+3. Calls `broadcast()` so SSE clients get a fresh elapsed value
+
+**Called** immediately after `setStatus(nodeID, "running", "Working...")` in `executeNode`, so the heartbeat starts as soon as a node enters the running state. The goroutine self-terminates when the node leaves `running` (done/error/cancelled) or when `ctx` is cancelled.

@@ -127,6 +127,7 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 	o.watchLogStream(nodeID, logStream)
 
 	o.setStatus(nodeID, "running", "Working...")
+	o.startHeartbeat(ctx, nodeID)
 
 	prompt := o.expandPromptForNode(nodeID, node.Config.Prompt, workdir)
 	model := node.Config.Model
@@ -729,6 +730,35 @@ func (o *Orchestrator) watchLogStream(nodeID string, ls *LogStream) {
 				o.broadcast()
 			}
 			o.mu.Unlock()
+		}
+	}()
+}
+
+// startHeartbeat starts a goroutine that broadcasts elapsed time updates every 2s
+// while nodeID is in "running" state. It stops when ctx is done or the node
+// leaves the "running" state.
+func (o *Orchestrator) startHeartbeat(ctx context.Context, nodeID string) {
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				o.mu.Lock()
+				ns, ok := o.statuses[nodeID]
+				if !ok || ns.Status != "running" {
+					o.mu.Unlock()
+					return
+				}
+				if ns.StartedAt > 0 {
+					ns.Elapsed = int(float64(time.Now().Unix()) - ns.StartedAt)
+					o.statuses[nodeID] = ns
+				}
+				o.broadcast()
+				o.mu.Unlock()
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 }
