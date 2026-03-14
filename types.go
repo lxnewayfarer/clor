@@ -69,8 +69,10 @@ type OutputArtifact struct {
 }
 
 type Edge struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Source     string `json:"source"`
+	Target     string `json:"target"`
+	SourcePort string `json:"source_port,omitempty"`
+	TargetPort string `json:"target_port,omitempty"`
 }
 
 // ── Questions (interactive nodes) ───────────

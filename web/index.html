@@ -79,9 +79,12 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .drawflow{background:var(--bg)!important;background-image:radial-gradient(var(--border) 1px,transparent 1px)!important;background-size:20px 20px!important}
 .drawflow .drawflow-node{background:var(--bg2);border:1px solid var(--border);border-radius:8px;color:var(--text);min-width:180px;padding:0}
 .drawflow .drawflow-node.selected{background:var(--bg2);border-color:var(--select);box-shadow:0 0 0 2px var(--select-glow)}
-.drawflow .drawflow-node .inputs,.drawflow .drawflow-node .outputs{position:relative}
+.drawflow .drawflow-node .inputs,.drawflow .drawflow-node .outputs{position:static}
 .drawflow .drawflow-node .input,.drawflow .drawflow-node .output{width:10px;height:10px;background:var(--bg4);border:2px solid var(--border2);border-radius:50%}
 .drawflow .drawflow-node .input:hover,.drawflow .drawflow-node .output:hover{background:var(--accent);border-color:var(--accent)}
+/* Top port (input_2) and bottom port (output_2): diamond shape, centered */
+.drawflow .drawflow-node .input.input_2{position:absolute;left:50%;top:-6px;transform:translateX(-50%) rotate(45deg);border-radius:2px;margin:0}
+.drawflow .drawflow-node .output.output_2{position:absolute;left:50%;bottom:-6px;top:auto;transform:translateX(-50%) rotate(45deg);border-radius:2px;margin:0}
 .drawflow .connection .main-path{stroke:var(--border2);stroke-width:2}
 .drawflow .drawflow-delete{display:none}
 
@@ -209,6 +212,7 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .drawflow .conn-agent-reviewer .main-path{stroke:var(--purple)}
 .drawflow .conn-to-committer .main-path{stroke:var(--coral)}
 .drawflow .connection:hover .main-path{stroke-width:3}
+.drawflow .conn-vertical .main-path{stroke-dasharray:6 3}
 
 /* ── Zoom controls ── */
 #zoom-controls{position:absolute;bottom:12px;right:12px;z-index:100;display:flex;gap:4px;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:4px}
@@ -262,7 +266,7 @@ kbd{background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padd
   <button onclick="savePipeline()">Save</button>
   <button onclick="downloadJSON()">Export</button>
   <button onclick="importJSON()">Import</button>
-  <button class="auto-layout-btn" onclick="autoLayout()" title="Auto-arrange nodes by wave order">Layout</button>
+  <button id="layout-btn" class="auto-layout-btn" onclick="cycleLayout()" title="Auto-arrange nodes (click to cycle: horizontal → vertical → auto)">Layout: H</button>
   <button onclick="openVariablesModal()" title="Pipeline variables">Vars</button>
   <button id="help-btn" onclick="toggleShortcutsHelp()" title="Keyboard shortcuts">?</button>
   <button class="btn-run" onclick="runPipeline()" id="btn-run">&#9654; Run</button>
@@ -407,6 +411,7 @@ let undoStack = [];
 let redoStack = [];
 const MAX_UNDO = 50;
 let logFollowing = true;
+let layoutMode = 'horizontal'; // 'horizontal' | 'vertical' | 'auto'
 
 const PRESETS = [
   {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],tempFiles:['plan.md'],prompt:'You are a system architect. Analyze {task} and produce a detailed implementation plan.\n\nIf anything is unclear or ambiguous about the task, output a "## Questions" section with a numbered list of questions BEFORE producing the plan. Example:\n\n## Questions\n1. Should we support both PostgreSQL and SQLite?\n2. What is the expected request rate for the API?\n\nOnce you have enough clarity (or if the task is already clear), your output MUST contain a "## Subtasks" section with a numbered list of independent, self-contained subtasks that downstream agents (coder, tester) will execute in parallel. Each subtask should be a clear, actionable description — one line per subtask.\n\nExample format:\n\n## Subtasks\n1. Refactor auth middleware to use JWT validation\n2. Add rate-limiting to /api/upload endpoint\n3. Update User model with email verification fields\n\nBefore the subtasks section, include any shared context, architectural decisions, or constraints that all subtasks depend on. Write the full plan to plan.md.'},
@@ -469,8 +474,8 @@ function addNode(preset, posX, posY) {
     data.projectAlias = projects[0].alias;
   }
 
-  const inputs = preset.type === 'task' ? 0 : 1;
-  const outputs = 1;
+  const inputs = preset.type === 'task' ? 0 : 2;
+  const outputs = 2;
 
   editor.addNode(id, inputs, outputs, posX, posY, '', data, nodeHTML(data));
   return id;
@@ -514,22 +519,21 @@ const SNAP_THRESHOLD = 8;
   canvasEl.appendChild(svg);
 })();
 
-function updateGuideLines(snapX, snapY, x, y, w, h) {
+// guides: [{axis:'x'|'y', canvasPos}] — pixel coords on screen for guide lines
+function updateGuideLines(guides) {
   const svg = document.getElementById('guide-lines');
   if (!svg) return;
-  svg.innerHTML = '';
-  const z = editor.zoom;
-  const pc = editor.precanvas;
-  const tx = pc ? parseFloat(pc.style.transform?.match(/translate\(([-\d.]+)px/)?.[1] || 0) : 0;
-  const ty = pc ? parseFloat(pc.style.transform?.match(/,\s*([-\d.]+)px/)?.[1] || 0) : 0;
-  if (snapX !== null) {
-    const lx = (x + w/2) * z + tx;
-    svg.innerHTML += '<line x1="'+lx+'" y1="0" x2="'+lx+'" y2="100%" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>';
+  let lines = '';
+  for (const g of guides) {
+    if (g.axis === 'x') {
+      // vertical line — column alignment guide (nodes stacked top-to-bottom share same X)
+      lines += '<line x1="'+g.canvasPos+'" y1="0" x2="'+g.canvasPos+'" y2="100%" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>';
+    } else {
+      // horizontal line — row alignment guide (nodes side-by-side share same Y)
+      lines += '<line x1="0" y1="'+g.canvasPos+'" x2="100%" y2="'+g.canvasPos+'" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.6"/>';
+    }
   }
-  if (snapY !== null) {
-    const ly = (y + h/2) * z + ty;
-    svg.innerHTML += '<line x1="0" y1="'+ly+'" x2="100%" y2="'+ly+'" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>';
-  }
+  svg.innerHTML = lines;
 }
 
 editor.on('nodeMoved', function(dfId) {
@@ -546,6 +550,9 @@ editor.on('nodeMoved', function(dfId) {
   const nRight = nx + w, nBottom = ny + h;
 
   let snapX = null, snapY = null;
+  // collect all matching alignment positions to show multiple guide lines
+  const xGuides = new Set(); // logical center-x values (for vertical column guides)
+  const yGuides = new Set(); // logical center-y values (for horizontal row guides)
 
   const exp = getEditorData();
   Object.keys(exp).forEach(otherId => {
@@ -558,17 +565,29 @@ editor.on('nodeMoved', function(dfId) {
     const ox = other.pos_x, oy = other.pos_y;
     const oCx = ox + ow/2, oCy = oy + oh/2;
 
-    if (snapX === null && Math.abs(nCx - oCx) < SNAP_THRESHOLD) snapX = oCx - w/2;
-    if (snapX === null && Math.abs(nx - ox) < SNAP_THRESHOLD) snapX = ox;
-    if (snapX === null && Math.abs(nRight - (ox + ow)) < SNAP_THRESHOLD) snapX = ox + ow - w;
-    if (snapX === null && Math.abs(nx - (ox + ow)) < SNAP_THRESHOLD) snapX = ox + ow;
-    if (snapX === null && Math.abs(nRight - ox) < SNAP_THRESHOLD) snapX = ox - w;
+    // X snap -> vertical guide line helps align nodes in a column (top-to-bottom flow)
+    let cx = null;
+    if (Math.abs(nCx - oCx) < SNAP_THRESHOLD) cx = oCx - w/2;
+    else if (Math.abs(nx - ox) < SNAP_THRESHOLD) cx = ox;
+    else if (Math.abs(nRight - (ox + ow)) < SNAP_THRESHOLD) cx = ox + ow - w;
+    else if (Math.abs(nx - (ox + ow)) < SNAP_THRESHOLD) cx = ox + ow;
+    else if (Math.abs(nRight - ox) < SNAP_THRESHOLD) cx = ox - w;
+    if (cx !== null) {
+      if (snapX === null) snapX = cx;
+      xGuides.add(cx + w/2);
+    }
 
-    if (snapY === null && Math.abs(nCy - oCy) < SNAP_THRESHOLD) snapY = oCy - h/2;
-    if (snapY === null && Math.abs(ny - oy) < SNAP_THRESHOLD) snapY = oy;
-    if (snapY === null && Math.abs(nBottom - (oy + oh)) < SNAP_THRESHOLD) snapY = oy + oh - h;
-    if (snapY === null && Math.abs(ny - (oy + oh)) < SNAP_THRESHOLD) snapY = oy + oh;
-    if (snapY === null && Math.abs(nBottom - oy) < SNAP_THRESHOLD) snapY = oy - h;
+    // Y snap -> horizontal guide line helps align nodes in a row (left-to-right flow)
+    let cy = null;
+    if (Math.abs(nCy - oCy) < SNAP_THRESHOLD) cy = oCy - h/2;
+    else if (Math.abs(ny - oy) < SNAP_THRESHOLD) cy = oy;
+    else if (Math.abs(nBottom - (oy + oh)) < SNAP_THRESHOLD) cy = oy + oh - h;
+    else if (Math.abs(ny - (oy + oh)) < SNAP_THRESHOLD) cy = oy + oh;
+    else if (Math.abs(nBottom - oy) < SNAP_THRESHOLD) cy = oy - h;
+    if (cy !== null) {
+      if (snapY === null) snapY = cy;
+      yGuides.add(cy + h/2);
+    }
   });
 
   const finalX = snapX !== null ? snapX : Math.round(nx / GRID_SIZE) * GRID_SIZE;
@@ -582,7 +601,22 @@ editor.on('nodeMoved', function(dfId) {
     editor.updateConnectionNodes('node-'+dfId);
   }
 
-  updateGuideLines(snapX, snapY, finalX, finalY, w, h);
+  // convert logical coords to canvas pixels and build guide list
+  const guides = [];
+  const z = editor.zoom;
+  const pc = editor.precanvas;
+  const mt = pc?.style.transform?.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/);
+  const tx = mt ? parseFloat(mt[1]) : 0;
+  const ty = mt ? parseFloat(mt[2]) : 0;
+  if (snapX !== null) {
+    xGuides.add(finalX + w/2); // always include the snapped node's own column
+    xGuides.forEach(lx => guides.push({axis: 'x', canvasPos: lx * z + tx}));
+  }
+  if (snapY !== null) {
+    yGuides.add(finalY + h/2);
+    yGuides.forEach(ly => guides.push({axis: 'y', canvasPos: ly * z + ty}));
+  }
+  updateGuideLines(guides);
 });
 
 document.addEventListener('mouseup', () => {
@@ -1020,7 +1054,7 @@ function buildPipelineJSON() {
       n.outputs[outKey].connections.forEach(conn => {
         const targetNode = module[conn.node];
         if (targetNode) {
-          edges.push({source: d.nodeId, target: targetNode.data.nodeId});
+          edges.push({source: d.nodeId, target: targetNode.data.nodeId, source_port: outKey, target_port: conn.input});
         }
       });
     });
@@ -1126,8 +1160,8 @@ async function loadPipeline(name) {
         data.text = data.description;
       }
 
-      const inputs = n.type === 'task' ? 0 : 1;
-      const outputs = 1;
+      const inputs = n.type === 'task' ? 0 : 2;
+      const outputs = 2;
       const px = n.pos ? n.pos.x : 200 + Math.random()*400;
       const py = n.pos ? n.pos.y : 100 + Math.random()*300;
 
@@ -1140,13 +1174,14 @@ async function loadPipeline(name) {
       const srcDF = idToDF[e.source];
       const tgtDF = idToDF[e.target];
       if (srcDF && tgtDF) {
-        editor.addConnection(srcDF, tgtDF, 'output_1', 'input_1');
+        editor.addConnection(srcDF, tgtDF, e.source_port || 'output_1', e.target_port || 'input_1');
       }
     });
 
     document.getElementById('run-status').textContent = 'loaded: ' + name;
     showToast('Loaded: ' + name, 'info');
     updateEmptyState();
+    setTimeout(fixVerticalConnectionPaths, 100);
   } catch(err) {
     console.error('load error', err);
     showToast('Load error: ' + err.message, 'error');
@@ -1618,8 +1653,8 @@ function importJSON() {
         if (n.type === 'task' && !data.text && data.description) {
           data.text = data.description;
         }
-        const inputs = n.type === 'task' ? 0 : 1;
-        const outputs = 1;
+        const inputs = n.type === 'task' ? 0 : 2;
+        const outputs = 2;
         const px = n.pos ? n.pos.x : 200 + Math.random()*400;
         const py = n.pos ? n.pos.y : 100 + Math.random()*300;
         const dfId = editor.addNode(n.id, inputs, outputs, px, py, '', data, nodeHTML(data));
@@ -1629,7 +1664,7 @@ function importJSON() {
       (config.edges||[]).forEach(e => {
         const srcDF = idToDF[e.source];
         const tgtDF = idToDF[e.target];
-        if (srcDF && tgtDF) editor.addConnection(srcDF, tgtDF, 'output_1', 'input_1');
+        if (srcDF && tgtDF) editor.addConnection(srcDF, tgtDF, e.source_port || 'output_1', e.target_port || 'input_1');
       });
 
       document.getElementById('run-status').textContent = 'imported: ' + (config.name || file.name);
@@ -1699,8 +1734,8 @@ document.addEventListener('keydown', e => {
       const d = Object.assign({}, info.data);
       nodeCounter++;
       d.nodeId = d.type + '_' + nodeCounter;
-      const inputs = d.type === 'task' ? 0 : 1;
-      const outputs = 1;
+      const inputs = d.type === 'task' ? 0 : 2;
+      const outputs = 2;
       editor.addNode(d.nodeId, inputs, outputs, info.pos_x + 30, info.pos_y + 30, '', d, nodeHTML(d));
     }
   }
@@ -1900,6 +1935,9 @@ function redo() {
 editor.on('nodeCreated', () => updateEmptyState());
 editor.on('nodeRemoved', () => updateEmptyState());
 
+// Re-fix vertical connection bezier paths after node moves (Drawflow redraws them)
+editor.on('nodeMoved', () => requestAnimationFrame(fixVerticalConnectionPaths));
+
 // Connection color coding and cycle detection
 editor.on('connectionCreated', function(info) {
   const id_output = info.output_id ?? info.id_output;
@@ -1924,6 +1962,19 @@ editor.on('connectionCreated', function(info) {
     editor.removeSingleConnection(id_output, id_input, output_class, input_class);
     showToast('Connection would create a cycle — removed', 'warning');
     return;
+  }
+
+  // ── Block cross-direction connections ──
+  // output_1→input_1 = horizontal, output_2→input_2 = vertical
+  // output_1→input_2 or output_2→input_1 are invalid
+  if (output_class && input_class) {
+    const outNum = output_class.replace('output_', '');
+    const inNum = input_class.replace('input_', '');
+    if (outNum !== inNum) {
+      editor.removeSingleConnection(id_output, id_input, output_class, input_class);
+      showToast('Cross-direction connections not allowed (use output_1→input_1 or output_2→input_2)', 'warning');
+      return;
+    }
   }
 
   // ── Check task-to-task connection ──
@@ -1953,6 +2004,7 @@ editor.on('connectionCreated', function(info) {
         });
       });
     });
+    fixVerticalConnectionPaths();
   }, 50);
 });
 
@@ -1964,8 +2016,11 @@ function applyConnectionColor(srcDfId, tgtDfId, outClass, inClass) {
   const srcType = srcNode.data.type;
   const tgtLabel = (tgtNode.data.label || '').toLowerCase();
 
-  // Find the connection SVG element - Drawflow uses node-N-N pattern
-  const connEl = canvasEl.querySelector('.connection.node_in_node-' + tgtDfId + '.node_out_node-' + srcDfId);
+  // Find the connection SVG element - Drawflow adds port classes for uniqueness
+  const portSelector = outClass && inClass
+    ? '.connection.node_in_node-' + tgtDfId + '.node_out_node-' + srcDfId + '.' + outClass + '.' + inClass
+    : '.connection.node_in_node-' + tgtDfId + '.node_out_node-' + srcDfId;
+  const connEl = canvasEl.querySelector(portSelector);
   if (!connEl) return;
 
   connEl.classList.remove('conn-task-agent', 'conn-agent-reviewer', 'conn-to-committer');
@@ -1978,7 +2033,51 @@ function applyConnectionColor(srcDfId, tgtDfId, outClass, inClass) {
   }
 }
 
+// ── VERTICAL CONNECTION PATH FIX ───────────
+// Drawflow draws bezier curves with horizontal control points (good for left→right).
+// For output_2→input_2 (bottom→top) connections we rewrite the path so control
+// points extend vertically, giving a natural top-to-bottom S-curve.
+function fixVerticalConnectionPaths() {
+  const vertConns = canvasEl.querySelectorAll('.drawflow .connection.output_2.input_2');
+  vertConns.forEach(conn => {
+    conn.classList.add('conn-vertical');
+    const path = conn.querySelector('.main-path');
+    if (!path) return;
+    const d = path.getAttribute('d');
+    if (!d) return;
+    // Drawflow path format: "M x1 y1 C cx1 cy1 cx2 cy2 x2 y2"
+    const m = d.match(/M\s*([\d.]+)\s+([\d.]+)\s+C\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+    if (!m) return;
+    const x1 = parseFloat(m[1]), y1 = parseFloat(m[2]);
+    const x2 = parseFloat(m[7]), y2 = parseFloat(m[8]);
+    // Vertical bezier: control points offset vertically by ~40% of the dy distance
+    const dy = Math.abs(y2 - y1);
+    const bend = Math.max(dy * 0.5, 60);
+    const cx1 = x1, cy1 = y1 + bend;
+    const cx2 = x2, cy2 = y2 - bend;
+    path.setAttribute('d', `M ${x1} ${y1} C ${cx1} ${cy1} ${cx2} ${cy2} ${x2} ${y2}`);
+  });
+}
+
 // ── AUTO-LAYOUT ────────────────────────────
+function cycleLayout() {
+  if (layoutMode === 'horizontal') layoutMode = 'vertical';
+  else if (layoutMode === 'vertical') layoutMode = 'auto';
+  else layoutMode = 'horizontal';
+  const btn = document.getElementById('layout-btn');
+  if (btn) {
+    const labels = { horizontal: 'Layout: H', vertical: 'Layout: V', auto: 'Layout: A' };
+    const titles = {
+      horizontal: 'Horizontal — waves as columns, left→right (click to switch)',
+      vertical: 'Vertical — waves as rows, top→bottom (click to switch)',
+      auto: 'Auto — parallel nodes stacked vertically, waves left→right (click to switch)'
+    };
+    btn.textContent = labels[layoutMode];
+    btn.title = titles[layoutMode];
+  }
+  autoLayout();
+}
+
 function autoLayout() {
   const config = buildPipelineJSON();
   if (!config.nodes.length) return;
@@ -2008,29 +2107,58 @@ function autoLayout() {
 
   saveUndoState();
 
-  const WAVE_GAP = 280;
-  const NODE_GAP = 120;
   const START_X = 80;
   const START_Y = 80;
 
-  waves.forEach((wave, wi) => {
-    const totalHeight = wave.length * NODE_GAP;
-    const offsetY = START_Y + (wave.length > 1 ? 0 : totalHeight / 4);
-    wave.forEach((nodeId, ni) => {
-      const dfId = getDfIdByNodeId(nodeId);
-      if (!dfId) return;
-      const x = START_X + wi * WAVE_GAP;
-      const y = offsetY + ni * NODE_GAP;
-      const el = canvasEl.querySelector('#node-'+dfId);
-      if (el) {
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
-        const info = getNodeDataDirect(dfId);
-        if (info) { info.pos_x = x; info.pos_y = y; }
-        editor.updateConnectionNodes('node-'+dfId);
-      }
+  function placeNode(nodeId, x, y) {
+    const dfId = getDfIdByNodeId(nodeId);
+    if (!dfId) return;
+    const el = canvasEl.querySelector('#node-'+dfId);
+    if (el) {
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      const info = getNodeDataDirect(dfId);
+      if (info) { info.pos_x = x; info.pos_y = y; }
+      editor.updateConnectionNodes('node-'+dfId);
+    }
+  }
+
+  if (layoutMode === 'vertical') {
+    // Waves as rows (top→bottom), nodes spread horizontally within each row.
+    // Between-wave connections use output_2→input_2 (bottom/top ports).
+    const WAVE_GAP = 160;
+    const NODE_GAP = 280;
+    waves.forEach((wave, wi) => {
+      wave.forEach((nodeId, ni) => {
+        placeNode(nodeId, START_X + ni * NODE_GAP, START_Y + wi * WAVE_GAP);
+      });
     });
-  });
+  } else if (layoutMode === 'auto') {
+    // Parallel nodes within a wave stacked vertically (output_2→input_2).
+    // Sequential waves advance horizontally (output_1→input_1).
+    const WAVE_GAP = 280;
+    const NODE_GAP = 140;
+    const maxWaveNodes = Math.max(...waves.map(w => w.length));
+    const totalColumnHeight = (maxWaveNodes - 1) * NODE_GAP;
+    waves.forEach((wave, wi) => {
+      const waveHeight = (wave.length - 1) * NODE_GAP;
+      const offsetY = START_Y + Math.floor((totalColumnHeight - waveHeight) / 2);
+      wave.forEach((nodeId, ni) => {
+        placeNode(nodeId, START_X + wi * WAVE_GAP, offsetY + ni * NODE_GAP);
+      });
+    });
+  } else {
+    // Default horizontal: waves as columns, nodes stacked vertically within each column.
+    const WAVE_GAP = 280;
+    const NODE_GAP = 120;
+    waves.forEach((wave, wi) => {
+      wave.forEach((nodeId, ni) => {
+        placeNode(nodeId, START_X + wi * WAVE_GAP, START_Y + ni * NODE_GAP);
+      });
+    });
+  }
+
+  requestAnimationFrame(fixVerticalConnectionPaths);
 }
 
 // ── TOAST NOTIFICATIONS ────────────────────
