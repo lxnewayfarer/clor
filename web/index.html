@@ -228,9 +228,9 @@ let redoStack = [];
 const MAX_UNDO = 50;
 
 const PRESETS = [
-  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and create an implementation plan in plan.md.'},
-  {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],prompt:'You are a CODER agent. Implement the changes described in {task}. Follow the plan in {read:plan.md}.'},
-  {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the code changes described in {task}.'},
+  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and produce a detailed implementation plan.\n\nYour output MUST contain a "## Subtasks" section with a numbered list of independent, self-contained subtasks that downstream agents (coder, tester) will execute in parallel. Each subtask should be a clear, actionable description — one line per subtask.\n\nExample format:\n\n## Subtasks\n1. Refactor auth middleware to use JWT validation\n2. Add rate-limiting to /api/upload endpoint\n3. Update User model with email verification fields\n\nBefore the subtasks section, include any shared context, architectural decisions, or constraints that all subtasks depend on. Write the full plan to plan.md.'},
+  {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],prompt:'You are a CODER agent. Implement the following change:\n\n{subtask}\n\nContext from the architect plan: {read:plan.md}\n\nFull task description: {task}\n\nFocus only on your assigned subtask. Do not modify code unrelated to it.'},
+  {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the following change:\n\n{subtask}\n\nFull task description: {task}\n\nFocus only on testing your assigned subtask. Ensure all tests pass before finishing.'},
   {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.'},
   {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],prompt:'Summarize what was built for {task}. Read all changed files and produce a final report.'},
   {type:'agent',icon:'\u{1F4E6}',label:'Committer',tools:['Bash'],prompt:'You are a git committer agent. Stage all changes, create a descriptive commit message based on {task}, commit and push to the current branch.\n\nRun:\ngit add -A\ngit commit -m "<descriptive message based on the task>"\ngit push'},
@@ -554,25 +554,30 @@ function showConfigPanel(dfId) {
     html += '</div>';
     html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
 
-    // Decompose mode
-    const decEnabled = d.decompose ? true : false;
-    html += '<label><input type="checkbox" id="cf-decompose" style="width:auto;margin-right:4px"'+(decEnabled?' checked':'')+'/> Decompose subtasks</label>';
-    html += '<div class="hint">When enabled, reads upstream architect\'s "## Subtasks" and runs each as a separate claude session. Use {subtask} in prompt.</div>';
+    // Decompose mode (only for coder/tester nodes)
+    const nodeLabel = (d.label||'').toLowerCase();
+    if (nodeLabel.includes('coder') || nodeLabel.includes('tester')) {
+      const decEnabled = d.decompose ? true : false;
+      html += '<label><input type="checkbox" id="cf-decompose" style="width:auto;margin-right:4px"'+(decEnabled?' checked':'')+'/> Decompose subtasks</label>';
+      html += '<div class="hint">When enabled, reads upstream architect\'s "## Subtasks" and runs each as a separate claude session. Use {subtask} in prompt.</div>';
+    }
 
-    // Reviewer config
-    html += '<label>Reviewer for (target node)</label><select id="cf-reviewer-for">';
-    html += '<option value="">— none (not a reviewer) —</option>';
-    const allNodes = getAllNodeIds();
-    allNodes.forEach(n => {
-      if (n.nodeId === d.nodeId) return;
-      const sel = (d.reviewerFor === n.nodeId) ? ' selected' : '';
-      html += '<option value="'+n.nodeId+'"'+sel+'>'+esc(n.label || n.nodeId)+'</option>';
-    });
-    html += '</select>';
-    html += '<div id="cf-reviewer-config" style="margin-top:4px;'+(d.reviewerFor?'':'display:none')+'">';
-    html += '<label>Max review rounds</label><input type="number" id="cf-max-review" value="'+(d.maxRetries||3)+'" min="1" max="10" style="width:80px" />';
-    html += '</div>';
-    html += '<div class="hint">If set, this node acts as a reviewer. On FAIL, target node re-runs with issues. Use {review_issues} in target prompt.</div>';
+    // Reviewer config (only for reviewer nodes)
+    if (nodeLabel.includes('reviewer') || nodeLabel.includes('review')) {
+      html += '<label>Reviewer for (target node)</label><select id="cf-reviewer-for">';
+      html += '<option value="">— none (not a reviewer) —</option>';
+      const allNodes = getAllNodeIds();
+      allNodes.forEach(n => {
+        if (n.nodeId === d.nodeId) return;
+        const sel = (d.reviewerFor === n.nodeId) ? ' selected' : '';
+        html += '<option value="'+n.nodeId+'"'+sel+'>'+esc(n.label || n.nodeId)+'</option>';
+      });
+      html += '</select>';
+      html += '<div id="cf-reviewer-config" style="margin-top:4px;'+(d.reviewerFor?'':'display:none')+'">';
+      html += '<label>Max review rounds</label><input type="number" id="cf-max-review" value="'+(d.maxRetries||3)+'" min="1" max="10" style="width:80px" />';
+      html += '</div>';
+      html += '<div class="hint">If set, this node acts as a reviewer. On FAIL, target node re-runs with issues. Use {review_issues} in target prompt.</div>';
+    }
 
   }
 
