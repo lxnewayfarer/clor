@@ -61,7 +61,6 @@ type NodeDetail struct {
 	MaxQuestionRounds int              `json:"max_question_rounds,omitempty"`
 	MaxRetries        int              `json:"max_retries,omitempty"`
 	RetryDelaySeconds int              `json:"retry_delay_seconds,omitempty"`
-	ReviewerFor       string           `json:"reviewer_for,omitempty"`
 }
 
 type OutputArtifact struct {

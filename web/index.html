@@ -557,20 +557,9 @@ function showConfigPanel(dfId) {
     }
 
     // Reviewer config (only for reviewer nodes)
-    if (nodeLabel.includes('reviewer') || nodeLabel.includes('review')) {
-      html += '<label>Reviewer for (target node)</label><select id="cf-reviewer-for">';
-      html += '<option value="">— none (not a reviewer) —</option>';
-      const allNodes = getAllNodeIds();
-      allNodes.forEach(n => {
-        if (n.nodeId === d.nodeId) return;
-        const sel = (d.reviewerFor === n.nodeId) ? ' selected' : '';
-        html += '<option value="'+n.nodeId+'"'+sel+'>'+esc(n.label || n.nodeId)+'</option>';
-      });
-      html += '</select>';
-      html += '<div id="cf-reviewer-config" style="margin-top:4px;'+(d.reviewerFor?'':'display:none')+'">';
+    if (nodeLabel.includes('review')) {
       html += '<label>Max review rounds</label><input type="number" id="cf-max-review" value="'+(d.maxRetries||3)+'" min="1" max="10" style="width:80px" />';
-      html += '</div>';
-      html += '<div class="hint">If set, this node acts as a reviewer. On FAIL, target node re-runs with issues. Use {review_issues} in target prompt.</div>';
+      html += '<div class="hint">Reviewer auto-detects its target from upstream connection. On FAIL, target re-runs with issues. Use {review_issues} in target prompt.</div>';
     }
 
   }
@@ -725,14 +714,6 @@ function showConfigPanel(dfId) {
     });
   }
 
-  const reviewerFor = document.getElementById('cf-reviewer-for');
-  if (reviewerFor) {
-    reviewerFor.addEventListener('change', () => {
-      info.data.reviewerFor = reviewerFor.value;
-      const cfg = document.getElementById('cf-reviewer-config');
-      if (cfg) cfg.style.display = reviewerFor.value ? '' : 'none';
-    });
-  }
   const maxReview = document.getElementById('cf-max-review');
   if (maxReview) {
     maxReview.addEventListener('input', () => {
@@ -822,7 +803,6 @@ function buildPipelineJSON() {
       max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
       max_retries: d.maxRetries || 0,
       retry_delay_seconds: d.retryDelaySeconds || 0,
-      reviewer_for: d.reviewerFor || '',
     };
     if (d.type === 'task') cfg.text = d.text || '';
     nodes.push({
@@ -918,7 +898,7 @@ async function loadPipeline(name) {
         maxQuestionRounds: n.config.max_question_rounds || 3,
         maxRetries: n.config.max_retries || 0,
         retryDelaySeconds: n.config.retry_delay_seconds || 0,
-        reviewerFor: n.config.reviewer_for || '',
+
         projectId: pIds[0] || '',
         projectIds: pIds,
         nodeId: n.id,
@@ -1343,7 +1323,7 @@ function importJSON() {
           maxQuestionRounds: n.config.max_question_rounds || 3,
           maxRetries: n.config.max_retries || 0,
           retryDelaySeconds: n.config.retry_delay_seconds || 0,
-          reviewerFor: n.config.reviewer_for || '',
+  
           projectId: pIds[0] || '',
           projectIds: pIds,
           nodeId: n.id,

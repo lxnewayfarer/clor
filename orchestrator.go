@@ -213,8 +213,8 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 	delete(o.logStreams, nodeID)
 	o.mu.Unlock()
 
-	// Review loop: if this node is a reviewer, parse output and potentially re-run target
-	if node.Config.ReviewerFor != "" {
+	// Review loop: auto-detect reviewer by label, target is upstream node
+	if isReviewerNode(node) {
 		o.handleReviewLoop(ctx, nodeID, node)
 		return
 	}
@@ -327,10 +327,30 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 	o.setStatus(nodeID, "done", fmt.Sprintf("Complete (%d subtasks)", total))
 }
 
+// isReviewerNode checks if a node is a reviewer by its label.
+func isReviewerNode(n NodeConfig) bool {
+	label := strings.ToLower(n.Label)
+	return strings.Contains(label, "review")
+}
+
+// getUpstreamNodeID returns the first upstream node ID for a given node.
+func (o *Orchestrator) getUpstreamNodeID(nodeID string) string {
+	for _, e := range o.config.Edges {
+		if e.Target == nodeID {
+			return e.Source
+		}
+	}
+	return ""
+}
+
 // handleReviewLoop implements the review cycle: reviewer checks target node's output,
 // if FAIL — writes issues to target's review.md, re-runs target, then re-runs reviewer.
 func (o *Orchestrator) handleReviewLoop(ctx context.Context, reviewerID string, reviewer NodeConfig) {
-	targetID := reviewer.Config.ReviewerFor
+	targetID := o.getUpstreamNodeID(reviewerID)
+	if targetID == "" {
+		o.setStatus(reviewerID, "error", "reviewer has no upstream node to review")
+		return
+	}
 	targetNode, ok := o.nodesMap[targetID]
 	if !ok {
 		o.setStatus(reviewerID, "error", "reviewer target node not found: "+targetID)
