@@ -1098,10 +1098,20 @@ function buildPipelineJSON() {
     });
   });
 
+  // Deduplicate nodes by ID (keep last occurrence to get latest state)
+  const seenNodeIds = new Set();
+  const dedupedNodes = [];
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    if (!seenNodeIds.has(nodes[i].id)) {
+      seenNodeIds.add(nodes[i].id);
+      dedupedNodes.unshift(nodes[i]);
+    }
+  }
+
   // Deduplicate edges by source+target (keep first occurrence)
   const seenEdges = new Set();
   const dedupedEdges = edges.filter(e => {
-    const key = e.source + ' ' + e.target;
+    const key = e.source + ' ' + e.target + ' ' + e.source_port + ' ' + e.target_port;
     if (seenEdges.has(key)) return false;
     seenEdges.add(key);
     return true;
@@ -1112,7 +1122,7 @@ function buildPipelineJSON() {
     name: document.getElementById('pipeline-name').value || 'untitled',
     settings: {model:'', timeout_seconds:600},
     variables: pipelineVariables.filter(v => v.name.trim()),
-    nodes,
+    nodes: dedupedNodes,
     edges: dedupedEdges
   };
 }
@@ -1169,13 +1179,15 @@ async function loadPipeline(name) {
     const res = await fetch('/api/pipelines/'+encodeURIComponent(name));
     const config = await res.json();
     editor.clear();
-    nodeCounter = 0;
     document.getElementById('pipeline-name').value = config.name || name;
     pipelineVariables = config.variables || [];
 
     const idToDF = {};
+    // Compute nodeCounter as max numeric suffix across all node IDs to avoid ID collisions
+    nodeCounter = 0;
     (config.nodes||[]).forEach(n => {
-      nodeCounter++;
+      const m = (n.id || '').match(/_(\d+)$/);
+      if (m) nodeCounter = Math.max(nodeCounter, parseInt(m[1], 10));
       const cfg = n.config || {};
       const pIds = cfg.project_ids || (cfg.project_id ? [cfg.project_id] : []);
       const proj = projects.find(p => p.id === (pIds[0] || ''));
@@ -1817,13 +1829,15 @@ function importJSON() {
       const text = await file.text();
       const config = JSON.parse(text);
       editor.clear();
-      nodeCounter = 0;
       document.getElementById('pipeline-name').value = config.name || 'imported';
       pipelineVariables = config.variables || [];
 
       const idToDF = {};
+      // Compute nodeCounter as max numeric suffix across all node IDs to avoid ID collisions
+      nodeCounter = 0;
       (config.nodes||[]).forEach(n => {
-        nodeCounter++;
+        const m = (n.id || '').match(/_(\d+)$/);
+        if (m) nodeCounter = Math.max(nodeCounter, parseInt(m[1], 10));
         const cfg = n.config || {};
         const pIds = cfg.project_ids || (cfg.project_id ? [cfg.project_id] : []);
         const proj = projects.find(p => p.id === (pIds[0] || ''));

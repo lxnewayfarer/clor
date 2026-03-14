@@ -61,7 +61,7 @@ func (o *Orchestrator) Run(ctx context.Context) {
 		o.setStatus(n.ID, "idle", "")
 	}
 
-	waves, err := ComputeWaves(o.config.Nodes, o.config.Edges)
+	waves, err := ComputeWaves(o.config.Nodes, FilterReviewBackEdges(o.config.Nodes, o.config.Edges))
 	if err != nil {
 		// Mark all nodes as error on cycle
 		for _, n := range o.config.Nodes {

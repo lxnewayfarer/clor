@@ -27,8 +27,8 @@ func ValidatePipeline(cfg PipelineConfig, projects []Project) []ValidationError 
 		}
 	}
 
-	// Check for cycles
-	_, cycleErr := ComputeWaves(cfg.Nodes, cfg.Edges)
+	// Check for cycles (exclude review back-edges which are handled by the orchestrator)
+	_, cycleErr := ComputeWaves(cfg.Nodes, FilterReviewBackEdges(cfg.Nodes, cfg.Edges))
 	if cycleErr != nil {
 		errs = append(errs, ValidationError{Level: "error", Message: cycleErr.Error()})
 	}

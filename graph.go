@@ -49,12 +49,47 @@ func FilterDownstream(nodes []NodeConfig, edges []Edge, startID string) ([]NodeC
 	return filteredNodes, filteredEdges
 }
 
+// FilterReviewBackEdges removes back-edges from reviewer nodes to their upstream targets.
+// Review loops are handled programmatically by the orchestrator, so these edges
+// must be excluded from topological sort to avoid false cycle detection.
+func FilterReviewBackEdges(nodes []NodeConfig, edges []Edge) []Edge {
+	nodeMap := make(map[string]NodeConfig)
+	for _, n := range nodes {
+		nodeMap[n.ID] = n
+	}
+
+	// Build set of upstream nodes for each node
+	upstreams := make(map[string]map[string]bool)
+	for _, e := range edges {
+		if upstreams[e.Target] == nil {
+			upstreams[e.Target] = make(map[string]bool)
+		}
+		upstreams[e.Target][e.Source] = true
+	}
+
+	var filtered []Edge
+	for _, e := range edges {
+		src := nodeMap[e.Source]
+		// Skip edges from a reviewer node back to its upstream (back-edges)
+		if isReviewerNode(src) && upstreams[src.ID] != nil && upstreams[src.ID][e.Target] {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
+}
+
 // ComputeWaves does topological sort and groups independent nodes
 // into waves for parallel execution. Returns an error if a cycle is detected.
 func ComputeWaves(nodes []NodeConfig, edges []Edge) ([][]string, error) {
-	ids := make([]string, len(nodes))
-	for i, n := range nodes {
-		ids[i] = n.ID
+	// Deduplicate node IDs (defensive: frontend may produce duplicate IDs)
+	seen := make(map[string]bool)
+	var ids []string
+	for _, n := range nodes {
+		if !seen[n.ID] {
+			seen[n.ID] = true
+			ids = append(ids, n.ID)
+		}
 	}
 
 	inDegree := make(map[string]int)
