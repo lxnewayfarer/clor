@@ -14,6 +14,7 @@
   --accent:#6e78ff;--accent2:#8b93ff;
   --green:#34d399;--amber:#fbbf24;--red:#f87171;
   --teal:#2dd4bf;--purple:#a78bfa;--coral:#fb923c;
+  --select:#5ba8a0;--select-glow:rgba(91,168,160,.22);
   --mono:'SF Mono','Cascadia Code','Fira Code',monospace;
   --sans:-apple-system,system-ui,'Segoe UI',sans-serif;
 }
@@ -67,7 +68,7 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 
 .drawflow{background:var(--bg)!important;background-image:radial-gradient(var(--border) 1px,transparent 1px)!important;background-size:20px 20px!important}
 .drawflow .drawflow-node{background:var(--bg2);border:1px solid var(--border);border-radius:8px;color:var(--text);min-width:180px;padding:0}
-.drawflow .drawflow-node.selected{border-color:var(--accent);box-shadow:0 0 0 2px rgba(110,120,255,.2)}
+.drawflow .drawflow-node.selected{background:var(--bg2);border-color:var(--select);box-shadow:0 0 0 2px var(--select-glow)}
 .drawflow .drawflow-node .inputs,.drawflow .drawflow-node .outputs{position:relative}
 .drawflow .drawflow-node .input,.drawflow .drawflow-node .output{width:10px;height:10px;background:var(--bg4);border:2px solid var(--border2);border-radius:50%}
 .drawflow .drawflow-node .input:hover,.drawflow .drawflow-node .output:hover{background:var(--accent);border-color:var(--accent)}
