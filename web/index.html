@@ -430,6 +430,7 @@ let pipelineVariables = [];
 let undoStack = [];
 let redoStack = [];
 const MAX_UNDO = 50;
+let isLoadingPipeline = false;
 const logFollowingMap = {}; // nodeId -> boolean
 const logTabs = new Map(); // nodeId -> {label, es, el, btnEl}
 let activeTabNodeId = null;
@@ -1082,13 +1083,22 @@ function buildPipelineJSON() {
     });
   });
 
+  // Deduplicate edges by source+target (keep first occurrence)
+  const seenEdges = new Set();
+  const dedupedEdges = edges.filter(e => {
+    const key = e.source + ' ' + e.target;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
+
   return {
     version: 1,
     name: document.getElementById('pipeline-name').value || 'untitled',
     settings: {model:'', timeout_seconds:600},
     variables: pipelineVariables.filter(v => v.name.trim()),
     nodes,
-    edges
+    edges: dedupedEdges
   };
 }
 
@@ -1191,7 +1201,8 @@ async function loadPipeline(name) {
       idToDF[n.id] = dfId;
     });
 
-    // Restore edges
+    // Restore edges (suppress connectionCreated handler during bulk import)
+    isLoadingPipeline = true;
     (config.edges||[]).forEach(e => {
       const srcDF = idToDF[e.source];
       const tgtDF = idToDF[e.target];
@@ -1199,11 +1210,26 @@ async function loadPipeline(name) {
         editor.addConnection(srcDF, tgtDF, e.source_port || 'output_1', e.target_port || 'input_1');
       }
     });
+    isLoadingPipeline = false;
 
     document.getElementById('run-status').textContent = 'loaded: ' + name;
     showToast('Loaded: ' + name, 'info');
     updateEmptyState();
-    setTimeout(fixVerticalConnectionPaths, 100);
+    // Single final pass: color all connections and fix vertical bezier paths
+    setTimeout(() => {
+      const exp = getEditorData();
+      const connections = canvasEl.querySelectorAll('.drawflow .connection');
+      connections.forEach(conn => conn.classList.remove('conn-task-agent', 'conn-agent-reviewer', 'conn-to-committer'));
+      Object.keys(exp).forEach(dfId => {
+        const nd = exp[dfId];
+        Object.keys(nd.outputs || {}).forEach(outKey => {
+          (nd.outputs[outKey].connections || []).forEach(conn => {
+            applyConnectionColor(dfId, conn.node, outKey, conn.output);
+          });
+        });
+      });
+      fixVerticalConnectionPaths();
+    }, 100);
   } catch(err) {
     console.error('load error', err);
     showToast('Load error: ' + err.message, 'error');
@@ -2094,10 +2120,32 @@ editor.on('nodeMoved', () => requestAnimationFrame(fixVerticalConnectionPaths));
 
 // Connection color coding and cycle detection
 editor.on('connectionCreated', function(info) {
+  // Skip all validation and DOM work during bulk pipeline import
+  if (isLoadingPipeline) return;
+
   const id_output = info.output_id ?? info.id_output;
   const id_input = info.input_id ?? info.id_input;
   const output_class = info.output_class;
   const input_class = info.input_class;
+
+  // ── Duplicate connection check ──
+  // Check if source→target already exists on any OTHER port (cross-port duplicate)
+  const expPre = getEditorData();
+  const srcNodePre = expPre[id_output];
+  if (srcNodePre) {
+    let isDuplicate = false;
+    Object.keys(srcNodePre.outputs || {}).forEach(outKey => {
+      if (outKey === output_class) return; // skip current connection's own port
+      (srcNodePre.outputs[outKey].connections || []).forEach(conn => {
+        if (String(conn.node) === String(id_input)) isDuplicate = true;
+      });
+    });
+    if (isDuplicate) {
+      editor.removeSingleConnection(id_output, id_input, output_class, input_class);
+      showToast('Nodes already connected', 'warning');
+      return;
+    }
+  }
 
   // ── Cycle detection ──
   const exp = getEditorData();
