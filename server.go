@@ -75,9 +75,20 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(pf)
 }
 
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[1:])
+	}
+	return path
+}
+
 func handleSaveProjects(w http.ResponseWriter, r *http.Request) {
 	var pf ProjectsFile
 	json.NewDecoder(r.Body).Decode(&pf)
+	for i := range pf.Projects {
+		pf.Projects[i].Path = expandHome(pf.Projects[i].Path)
+	}
 	data, _ := json.MarshalIndent(pf, "", "  ")
 	os.WriteFile(projectsPath(), data, 0644)
 	w.Header().Set("Content-Type", "application/json")

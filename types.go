@@ -41,6 +41,7 @@ type NodeConfig struct {
 type NodeDetail struct {
 	Description     string           `json:"description,omitempty"`
 	ProjectID       string           `json:"project_id,omitempty"`
+	ProjectIDs      []string         `json:"project_ids,omitempty"`
 	Prompt          string           `json:"prompt,omitempty"`
 	AllowedTools    []string         `json:"allowed_tools,omitempty"`
 	ModelOverride   string           `json:"model_override,omitempty"`

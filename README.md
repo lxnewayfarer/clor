@@ -17,7 +17,7 @@ Requires: Go 1.22+, `claude` CLI in PATH.
 ## Usage
 
 ```bash
-clor                    # start web UI on :998
+clor                    # start web UI on :9980
 clor -p 3000            # custom port
 clor --no-browser       # don't auto-open browser
 clor run pipeline.json  # headless execution

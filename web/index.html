@@ -211,7 +211,7 @@ function nodeHTML(data) {
 function addNode(preset, posX, posY) {
   nodeCounter++;
   const id = preset.type + '_' + nodeCounter;
-  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectColor:'', projectAlias:''});
+  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectIds:[], projectColor:'', projectAlias:''});
   if (preset.description) data.description = preset.description;
 
   const inputs = preset.type === 'task' ? 0 : 1;
@@ -333,8 +333,13 @@ function getAllNodeIds() {
   return result;
 }
 
+function getNodeDataDirect(dfId) {
+  // Access internal Drawflow data directly (not a copy)
+  return editor.drawflow.drawflow.Home.data[dfId];
+}
+
 function showConfigPanel(dfId) {
-  const info = editor.getNodeFromId(dfId);
+  const info = getNodeDataDirect(dfId);
   if (!info) return;
   const d = info.data;
   const panel = document.getElementById('config-panel');
@@ -348,12 +353,17 @@ function showConfigPanel(dfId) {
     html += '<label>Description</label><textarea id="cf-desc" rows="6">'+ esc(d.description||'')+'</textarea>';
     html += '<div class="hint">Use this to define the task for the pipeline</div>';
   } else {
-    // Project
-    html += '<label>Project</label><select id="cf-project"><option value="">— none —</option>';
+    // Description for agents too
+    html += '<label>Description</label><textarea id="cf-desc" rows="3">'+ esc(d.description||'')+'</textarea>';
+
+    // Projects (multiple)
+    if (!d.projectIds) d.projectIds = d.projectId ? [d.projectId] : [];
+    html += '<label>Projects</label><div id="cf-projects" class="tools-grid">';
     projects.forEach(p => {
-      html += '<option value="'+p.id+'"'+(d.projectId===p.id?' selected':'')+'>'+esc(p.alias)+' ('+esc(p.path)+')</option>';
+      const checked = d.projectIds.includes(p.id) ? ' checked' : '';
+      html += '<label class="tool-check"><input type="checkbox" data-proj="'+p.id+'"'+checked+'> <span class="project-dot" style="background:'+p.color+';display:inline-block;width:8px;height:8px;border-radius:50%"></span> '+esc(p.alias)+'</label>';
     });
-    html += '</select>';
+    html += '</div>';
 
     // Prompt
     html += '<label>Prompt</label><textarea id="cf-prompt" rows="8">'+esc(d.prompt||'')+'</textarea>';
@@ -396,13 +406,19 @@ function showConfigPanel(dfId) {
     updateNodeHTML(dfId);
   });
 
-  const projSelect = document.getElementById('cf-project');
-  if (projSelect) projSelect.addEventListener('change', () => {
-    info.data.projectId = projSelect.value;
-    const p = projects.find(x => x.id === projSelect.value);
-    info.data.projectColor = p ? p.color : '';
-    info.data.projectAlias = p ? p.alias : '';
-    updateNodeHTML(dfId);
+  // Multi-project checkboxes
+  content.querySelectorAll('[data-proj]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const ids = [];
+      content.querySelectorAll('[data-proj]:checked').forEach(c => ids.push(c.dataset.proj));
+      info.data.projectIds = ids;
+      // Keep backward compat: first project = primary
+      const first = projects.find(x => x.id === ids[0]);
+      info.data.projectId = ids[0] || '';
+      info.data.projectColor = first ? first.color : '';
+      info.data.projectAlias = first ? first.alias : '';
+      updateNodeHTML(dfId);
+    });
   });
 
   const promptInput = document.getElementById('cf-prompt');
@@ -584,6 +600,7 @@ function buildPipelineJSON() {
       config: {
         description: d.description || '',
         project_id: d.projectId || '',
+        project_ids: d.projectIds || (d.projectId ? [d.projectId] : []),
         prompt: d.prompt || '',
         allowed_tools: d.tools || [],
         model_override: d.modelOverride || '',
@@ -658,7 +675,8 @@ async function loadPipeline(name) {
     const idToDF = {};
     (config.nodes||[]).forEach(n => {
       nodeCounter++;
-      const proj = projects.find(p => p.id === n.config.project_id);
+      const pIds = n.config.project_ids || (n.config.project_id ? [n.config.project_id] : []);
+      const proj = projects.find(p => p.id === (pIds[0] || ''));
       const data = {
         type: n.type,
         icon: n.type==='task'?'\u{1F4CC}':n.type==='report'?'\u{1F3C1}':'\u{1F4BB}',
@@ -670,7 +688,8 @@ async function loadPipeline(name) {
         reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
         reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
         outputArtifacts: n.config.output_artifacts || [],
-        projectId: n.config.project_id || '',
+        projectId: pIds[0] || '',
+        projectIds: pIds,
         nodeId: n.id,
         projectColor: proj ? proj.color : '',
         projectAlias: proj ? proj.alias : '',
@@ -823,7 +842,8 @@ function importJSON() {
       const idToDF = {};
       (config.nodes||[]).forEach(n => {
         nodeCounter++;
-        const proj = projects.find(p => p.id === n.config.project_id);
+        const pIds = n.config.project_ids || (n.config.project_id ? [n.config.project_id] : []);
+        const proj = projects.find(p => p.id === (pIds[0] || ''));
         const data = {
           type: n.type,
           icon: n.type==='task'?'\u{1F4CC}':n.type==='report'?'\u{1F3C1}':'\u{1F4BB}',
@@ -835,7 +855,8 @@ function importJSON() {
           reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
           reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
           outputArtifacts: n.config.output_artifacts || [],
-          projectId: n.config.project_id || '',
+          projectId: pIds[0] || '',
+          projectIds: pIds,
           nodeId: n.id,
           projectColor: proj ? proj.color : '',
           projectAlias: proj ? proj.alias : '',

@@ -37,7 +37,7 @@ func main() {
 		}
 	}
 
-	port := flag.Int("p", 998, "port")
+	port := flag.Int("p", 9980, "port")
 	noBrowser := flag.Bool("no-browser", false, "don't open browser")
 	flag.Parse()
 
