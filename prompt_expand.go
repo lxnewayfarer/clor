@@ -54,15 +54,11 @@ func expandFilesVars(prompt, workdir string) string {
 
 func expandReviewIssues(prompt, workdir string) string {
 	return strings.ReplaceAll(prompt, "{review_issues}", func() string {
-		review, err := parseReview(filepath.Join(workdir, "review.md"))
+		data, err := os.ReadFile(filepath.Join(workdir, "review.md"))
 		if err != nil {
 			return ""
 		}
-		var all []string
-		for _, issues := range review.Issues {
-			all = append(all, issues...)
-		}
-		return strings.Join(all, "\n")
+		return string(data)
 	}())
 }
 

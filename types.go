@@ -27,9 +27,8 @@ type PipelineConfig struct {
 }
 
 type PipelineSettings struct {
-	Model            string `json:"model"`
-	TimeoutSeconds   int    `json:"timeout_seconds"`
-	MaxReviewRetries int    `json:"max_review_retries"`
+	Model          string `json:"model"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
 }
 
 type NodeConfig struct {
@@ -45,9 +44,8 @@ type NodeDetail struct {
 	ProjectIDs        []string         `json:"project_ids,omitempty"`
 	Prompt            string           `json:"prompt,omitempty"`
 	AllowedTools      []string         `json:"allowed_tools,omitempty"`
-	ModelOverride     string           `json:"model_override,omitempty"`
+	Model             string           `json:"model,omitempty"`
 	OutputArtifacts   []OutputArtifact `json:"output_artifacts,omitempty"`
-	ReviewMode        *ReviewMode      `json:"review_mode,omitempty"`
 	Interactive       bool             `json:"interactive,omitempty"`
 	MaxQuestionRounds int              `json:"max_question_rounds,omitempty"`
 }
@@ -55,13 +53,6 @@ type NodeDetail struct {
 type OutputArtifact struct {
 	File      string   `json:"file"`
 	DeliverTo []string `json:"deliver_to"`
-}
-
-type ReviewMode struct {
-	Enabled     bool              `json:"enabled"`
-	PassPattern string            `json:"pass_pattern"`
-	FailPattern string            `json:"fail_pattern"`
-	FixTargets  map[string]string `json:"fix_targets"`
 }
 
 type Edge struct {

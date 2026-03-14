@@ -90,13 +90,6 @@ func (o *Orchestrator) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-
-		for _, nid := range wave {
-			node := o.nodesMap[nid]
-			if node.Config.ReviewMode != nil && node.Config.ReviewMode.Enabled {
-				o.reviewLoop(ctx, node)
-			}
-		}
 	}
 }
 
@@ -117,7 +110,7 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 	o.setStatus(nodeID, "running", "Working...")
 
 	prompt := o.expandPrompt(node.Config.Prompt, workdir)
-	model := node.Config.ModelOverride
+	model := node.Config.Model
 	if model == "" {
 		model = o.config.Settings.Model
 	}
@@ -220,64 +213,6 @@ func (o *Orchestrator) SubmitAnswer(nodeID string, answers []Question) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func (o *Orchestrator) reviewLoop(ctx context.Context, reviewer NodeConfig) {
-	rm := reviewer.Config.ReviewMode
-	maxRetries := o.config.Settings.MaxReviewRetries
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
-
-	proj := o.projects[reviewer.Config.ProjectID]
-	reviewPath := filepath.Join(proj.Path, "review.md")
-
-	for round := 1; round <= maxRetries; round++ {
-		if ctx.Err() != nil {
-			return
-		}
-
-		review, err := parseReview(reviewPath)
-		if err != nil || review.Passed {
-			return
-		}
-
-		o.setStatus(reviewer.ID, "running",
-			fmt.Sprintf("Fix round %d/%d", round, maxRetries))
-
-		var wg sync.WaitGroup
-		for section, targetID := range rm.FixTargets {
-			issues := review.Issues[section]
-			if len(issues) == 0 {
-				continue
-			}
-			wg.Add(1)
-			go func(tid string, iss []string) {
-				defer wg.Done()
-				target := o.nodesMap[tid]
-				tproj := o.projects[target.Config.ProjectID]
-
-				reviewContent, _ := os.ReadFile(reviewPath)
-				fixPrompt := fmt.Sprintf(
-					"Fix these issues found in code review:\n\n%s\n\nFull review:\n%s",
-					strings.Join(iss, "\n"), string(reviewContent))
-
-				o.setStatus(tid, "running",
-					fmt.Sprintf("Fixing (round %d)", round))
-
-				model := target.Config.ModelOverride
-				if model == "" {
-					model = o.config.Settings.Model
-				}
-				runAgent(ctx, fixPrompt, target.Config.AllowedTools,
-					tproj.Path, model, o.config.Settings.TimeoutSeconds)
-				o.setStatus(tid, "done", "Fixed")
-			}(targetID, issues)
-		}
-		wg.Wait()
-
-		o.executeNode(ctx, reviewer.ID)
 	}
 }
 

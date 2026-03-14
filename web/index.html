@@ -120,7 +120,6 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .artifact-row{display:flex;gap:4px;align-items:center;margin-bottom:4px;font-size:12px}
 .artifact-row input{flex:1}
 .artifact-row select{width:120px}
-.review-config{margin-top:6px;padding:8px;background:var(--bg3);border-radius:6px}
 </style>
 </head>
 <body>
@@ -186,7 +185,7 @@ const PRESETS = [
   {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and create an implementation plan in plan.md.'},
   {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],prompt:'You are a CODER agent. Implement the changes described in {task}. Follow the plan in {read:plan.md}.'},
   {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the code changes described in {task}.'},
-  {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.',reviewMode:true},
+  {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.'},
   {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],prompt:'Summarize what was built for {task}. Read all changed files and produce a final report.'},
   {type:'task',icon:'\u{1F4CC}',label:'Task'},
 ];
@@ -228,7 +227,7 @@ function nodeHTML(data) {
 function addNode(preset, posX, posY) {
   nodeCounter++;
   const id = preset.type + '_' + nodeCounter;
-  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectIds:[], projectColor:'', projectAlias:''});
+  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectIds:[], projectColor:'', projectAlias:'', model: preset.model || 'claude-sonnet-4-6'});
   if (preset.description) data.description = preset.description;
 
   const inputs = preset.type === 'task' ? 0 : 1;
@@ -406,17 +405,6 @@ editor.on('nodeUnselected', function() {
   document.getElementById('config-panel').classList.add('hidden');
 });
 
-function getAllNodeIds() {
-  const exp = editor.export();
-  const mod = exp.drawflow.Home.data;
-  const result = [];
-  Object.keys(mod).forEach(k => {
-    const d = mod[k].data;
-    if (d && d.nodeId) result.push({id: d.nodeId, label: d.label || d.nodeId});
-  });
-  return result;
-}
-
 function getNodeDataDirect(dfId) {
   // Access internal Drawflow data directly (not a copy)
   return editor.drawflow.drawflow.Home.data[dfId];
@@ -454,7 +442,13 @@ function showConfigPanel(dfId) {
     html += '<div class="hint">{task} {read:file} {read:alias:file} {files:path/} {review_issues}</div>';
 
     // Model
-    html += '<label>Model override</label><input id="cf-model" value="'+esc(d.modelOverride||'')+'" placeholder="default" />';
+    const MODELS = ['claude-sonnet-4-6','claude-opus-4-6','claude-haiku-4-5-20251001'];
+    const curModel = d.model || '';
+    const isCustom = curModel && !MODELS.includes(curModel);
+    html += '<label>Model</label><select id="cf-model-select">';
+    MODELS.forEach(m => html += '<option value="'+m+'"'+(curModel===m?' selected':'')+'>'+m+'</option>');
+    html += '<option value="__custom"'+(isCustom?' selected':'')+'>Custom...</option></select>';
+    html += '<input id="cf-model-custom" value="'+esc(isCustom?curModel:'')+'" placeholder="model id" style="margin-top:4px;'+(isCustom?'':'display:none')+'" />';
 
     // Tools
     html += '<label>Tools</label><div class="tools-grid">';
@@ -477,10 +471,6 @@ function showConfigPanel(dfId) {
     html += '</div>';
     html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
 
-    // Review mode
-    const rmEnabled = d.reviewMode ? true : false;
-    html += '<label><input type="checkbox" id="cf-review-enabled" style="width:auto;margin-right:4px"'+(rmEnabled?' checked':'')+'/> Review mode</label>';
-    html += '<div id="cf-review-config" class="review-config"'+(rmEnabled?'':' style="display:none"')+'></div>';
   }
 
   content.innerHTML = html;
@@ -518,9 +508,22 @@ function showConfigPanel(dfId) {
     info.data.prompt = promptInput.value;
   });
 
-  const modelInput = document.getElementById('cf-model');
-  if (modelInput) modelInput.addEventListener('input', () => {
-    info.data.modelOverride = modelInput.value;
+  const modelSelect = document.getElementById('cf-model-select');
+  const modelCustom = document.getElementById('cf-model-custom');
+  if (modelSelect) {
+    modelSelect.addEventListener('change', () => {
+      if (modelSelect.value === '__custom') {
+        modelCustom.style.display = '';
+        modelCustom.focus();
+        info.data.model = modelCustom.value;
+      } else {
+        modelCustom.style.display = 'none';
+        info.data.model = modelSelect.value;
+      }
+    });
+  }
+  if (modelCustom) modelCustom.addEventListener('input', () => {
+    info.data.model = modelCustom.value;
   });
 
   content.querySelectorAll('[data-tool]').forEach(cb => {
@@ -575,35 +578,6 @@ function showConfigPanel(dfId) {
     renderArtifacts();
   }
 
-  // ── Review mode UI ──
-  function renderReviewConfig() {
-    const container = document.getElementById('cf-review-config');
-    if (!container) return;
-    if (!d.reviewMode) {
-      container.style.display = 'none';
-      return;
-    }
-    container.style.display = '';
-    if (!d.reviewFixTargets) d.reviewFixTargets = {};
-    const allNodes = getAllNodeIds().filter(n => n.id !== d.nodeId);
-    const sections = ['code_issues', 'test_issues'];
-    let h = '<div class="hint" style="margin-bottom:6px">Map review sections to fix targets:</div>';
-    sections.forEach(sec => {
-      h += '<div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;font-size:11px">' +
-        '<span style="min-width:80px">'+sec+'</span>' +
-        '<select data-sec="'+sec+'" class="rv-target"><option value="">— none —</option>' +
-        allNodes.map(n => '<option value="'+n.id+'"'+(d.reviewFixTargets[sec]===n.id?' selected':'')+'>'+esc(n.label)+'</option>').join('') +
-        '</select></div>';
-    });
-    container.innerHTML = h;
-    container.querySelectorAll('.rv-target').forEach(el => {
-      el.addEventListener('change', () => {
-        if (el.value) d.reviewFixTargets[el.dataset.sec] = el.value;
-        else delete d.reviewFixTargets[el.dataset.sec];
-      });
-    });
-  }
-
   const interactiveCheck = document.getElementById('cf-interactive');
   if (interactiveCheck) {
     interactiveCheck.addEventListener('change', () => {
@@ -619,15 +593,6 @@ function showConfigPanel(dfId) {
     });
   }
 
-  const reviewCheck = document.getElementById('cf-review-enabled');
-  if (reviewCheck) {
-    reviewCheck.addEventListener('change', () => {
-      d.reviewMode = reviewCheck.checked;
-      if (!d.reviewMode) d.reviewFixTargets = {};
-      renderReviewConfig();
-    });
-    renderReviewConfig();
-  }
 }
 
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -710,11 +675,10 @@ function buildPipelineJSON() {
         project_ids: d.projectIds || (d.projectId ? [d.projectId] : []),
         prompt: d.prompt || '',
         allowed_tools: d.tools || [],
-        model_override: d.modelOverride || '',
+        model: d.model || '',
         output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
         interactive: d.interactive || false,
         max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
-        review_mode: d.reviewMode ? {enabled:true, pass_pattern:'(?i)review\\s*status:\\s*pass', fail_pattern:'(?i)review\\s*status:\\s*fail', fix_targets: d.reviewFixTargets || {}} : null,
       }
     });
 
@@ -732,7 +696,7 @@ function buildPipelineJSON() {
   return {
     version: 1,
     name: document.getElementById('pipeline-name').value || 'untitled',
-    settings: {model:'', timeout_seconds:600, max_review_retries:3},
+    settings: {model:'', timeout_seconds:600},
     nodes,
     edges
   };
@@ -793,9 +757,7 @@ async function loadPipeline(name) {
         tools: n.config.allowed_tools || [],
         prompt: n.config.prompt || '',
         description: n.config.description || '',
-        modelOverride: n.config.model_override || '',
-        reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
-        reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
+        model: n.config.model || n.config.model_override || '',
         outputArtifacts: n.config.output_artifacts || [],
         interactive: n.config.interactive || false,
         maxQuestionRounds: n.config.max_question_rounds || 3,
@@ -1061,9 +1023,7 @@ function importJSON() {
           tools: n.config.allowed_tools || [],
           prompt: n.config.prompt || '',
           description: n.config.description || '',
-          modelOverride: n.config.model_override || '',
-          reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
-          reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
+          model: n.config.model || n.config.model_override || '',
           outputArtifacts: n.config.output_artifacts || [],
           interactive: n.config.interactive || false,
           maxQuestionRounds: n.config.max_question_rounds || 3,
