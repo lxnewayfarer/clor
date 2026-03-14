@@ -551,6 +551,7 @@ editor.on('nodeMoved', function(dfId) {
   Object.keys(exp).forEach(otherId => {
     if (otherId == dfId) return;
     const other = exp[otherId];
+    if (!other) return;
     const oel = canvasEl.querySelector('#node-'+otherId);
     if (!oel) return;
     const ow = oel.offsetWidth, oh = oel.offsetHeight;
@@ -987,6 +988,7 @@ function buildPipelineJSON() {
 
   Object.keys(module).forEach(dfId => {
     const n = module[dfId];
+    if (!n || !n.data) return;
     const d = n.data;
     const cfg = {
       description: d.description || '',
@@ -1093,24 +1095,25 @@ async function loadPipeline(name) {
     const idToDF = {};
     (config.nodes||[]).forEach(n => {
       nodeCounter++;
-      const pIds = n.config.project_ids || (n.config.project_id ? [n.config.project_id] : []);
+      const cfg = n.config || {};
+      const pIds = cfg.project_ids || (cfg.project_id ? [cfg.project_id] : []);
       const proj = projects.find(p => p.id === (pIds[0] || ''));
       const data = {
         type: n.type,
         icon: n.icon || (n.type==='task'?'\u{1F4CC}':'\u{1F4BB}'),
         label: n.label,
-        tools: n.config.allowed_tools || [],
-        prompt: n.config.prompt || '',
-        description: n.config.description || '',
-        text: n.config.text || '',
-        model: n.config.model || n.config.model_override || '',
-        outputArtifacts: n.config.output_artifacts || [],
-        tempFiles: n.config.temp_files || [],
-        interactive: n.config.interactive || false,
-        decompose: n.config.decompose || false,
-        maxQuestionRounds: n.config.max_question_rounds || 3,
-        maxRetries: n.config.max_retries || 0,
-        retryDelaySeconds: n.config.retry_delay_seconds || 0,
+        tools: cfg.allowed_tools || [],
+        prompt: cfg.prompt || '',
+        description: cfg.description || '',
+        text: cfg.text || '',
+        model: cfg.model || cfg.model_override || '',
+        outputArtifacts: cfg.output_artifacts || [],
+        tempFiles: cfg.temp_files || [],
+        interactive: cfg.interactive || false,
+        decompose: cfg.decompose || false,
+        maxQuestionRounds: cfg.max_question_rounds || 3,
+        maxRetries: cfg.max_retries || 0,
+        retryDelaySeconds: cfg.retry_delay_seconds || 0,
 
         projectId: pIds[0] || '',
         projectIds: pIds,
@@ -1586,24 +1589,25 @@ function importJSON() {
       const idToDF = {};
       (config.nodes||[]).forEach(n => {
         nodeCounter++;
-        const pIds = n.config.project_ids || (n.config.project_id ? [n.config.project_id] : []);
+        const cfg = n.config || {};
+        const pIds = cfg.project_ids || (cfg.project_id ? [cfg.project_id] : []);
         const proj = projects.find(p => p.id === (pIds[0] || ''));
         const data = {
           type: n.type,
           icon: n.icon || (n.type==='task'?'\u{1F4CC}':'\u{1F4BB}'),
           label: n.label,
-          tools: n.config.allowed_tools || [],
-          prompt: n.config.prompt || '',
-          description: n.config.description || '',
-          text: n.config.text || '',
-          model: n.config.model || n.config.model_override || '',
-          outputArtifacts: n.config.output_artifacts || [],
-          tempFiles: n.config.temp_files || [],
-          interactive: n.config.interactive || false,
-          maxQuestionRounds: n.config.max_question_rounds || 3,
-          maxRetries: n.config.max_retries || 0,
-          retryDelaySeconds: n.config.retry_delay_seconds || 0,
-  
+          tools: cfg.allowed_tools || [],
+          prompt: cfg.prompt || '',
+          description: cfg.description || '',
+          text: cfg.text || '',
+          model: cfg.model || cfg.model_override || '',
+          outputArtifacts: cfg.output_artifacts || [],
+          tempFiles: cfg.temp_files || [],
+          interactive: cfg.interactive || false,
+          maxQuestionRounds: cfg.max_question_rounds || 3,
+          maxRetries: cfg.max_retries || 0,
+          retryDelaySeconds: cfg.retry_delay_seconds || 0,
+
           projectId: pIds[0] || '',
           projectIds: pIds,
           nodeId: n.id,
@@ -1648,6 +1652,7 @@ function highlightProject(projectId) {
   if (!projectId) return;
   const mod = getEditorData();
   Object.keys(mod).forEach(dfId => {
+    if (!mod[dfId] || !mod[dfId].data) return;
     const d = mod[dfId].data;
     const el = canvasEl.querySelector('#node-'+dfId);
     if (!el) return;
@@ -1784,7 +1789,7 @@ initResize('rh-logs', document.getElementById('log-area'), 'height', 80, 500, 'v
 // ── HELPER: get all node IDs/labels ────────
 function getAllNodeIds() {
   const mod = getEditorData();
-  return Object.keys(mod).map(dfId => ({
+  return Object.keys(mod).filter(dfId => mod[dfId] && mod[dfId].data).map(dfId => ({
     nodeId: mod[dfId].data.nodeId,
     label: mod[dfId].data.label || mod[dfId].data.nodeId
   }));
@@ -1897,7 +1902,10 @@ editor.on('nodeRemoved', () => updateEmptyState());
 
 // Connection color coding and cycle detection
 editor.on('connectionCreated', function(info) {
-  const { id_output, id_input, output_class, input_class } = info;
+  const id_output = info.output_id ?? info.id_output;
+  const id_input = info.input_id ?? info.id_input;
+  const output_class = info.output_class;
+  const input_class = info.input_class;
 
   // ── Cycle detection ──
   const exp = getEditorData();
@@ -1919,8 +1927,8 @@ editor.on('connectionCreated', function(info) {
   }
 
   // ── Check task-to-task connection ──
-  const srcNode = editor.getNodeFromId(id_output);
-  const tgtNode = editor.getNodeFromId(id_input);
+  const srcNode = id_output != null ? editor.getNodeFromId(id_output) : null;
+  const tgtNode = id_input != null ? editor.getNodeFromId(id_input) : null;
   if (srcNode && tgtNode && srcNode.data.type === 'task' && tgtNode.data.type === 'task') {
     editor.removeSingleConnection(id_output, id_input, output_class, input_class);
     showToast('Cannot connect task nodes directly', 'warning');
