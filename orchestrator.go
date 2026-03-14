@@ -247,7 +247,7 @@ func (o *Orchestrator) getUpstreamOutput(nodeID string) string {
 }
 
 // executeDecomposed reads the upstream architect's output, parses subtasks,
-// and runs a separate claude session for each subtask.
+// and runs them in parallel.
 func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, node NodeConfig, prompt, workdir, model string, logStream *LogStream) {
 	upstreamOutput := o.getUpstreamOutput(nodeID)
 	subtasks := ParseSubtasks(upstreamOutput)
@@ -275,51 +275,115 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 	}
 
 	total := len(subtasks)
-	var cumulativeLog strings.Builder
 
+	// Initialize subtask statuses
+	stStatuses := make([]SubtaskStatus, total)
+	for i, st := range subtasks {
+		stStatuses[i] = SubtaskStatus{Index: i + 1, Label: st, Status: "pending"}
+	}
+	o.mu.Lock()
+	ns := o.statuses[nodeID]
+	ns.SubtaskTotal = total
+	ns.Subtasks = stStatuses
+	o.statuses[nodeID] = ns
+	o.mu.Unlock()
+	o.updateDecomposeMessage(nodeID)
+
+	// Results storage
+	type subtaskResult struct {
+		index  int
+		result string
+		err    error
+	}
+	results := make([]subtaskResult, total)
+
+	// Run all subtasks in parallel
+	var wg sync.WaitGroup
 	for i, subtask := range subtasks {
-		if ctx.Err() != nil {
-			o.setStatus(nodeID, "error", "Cancelled")
-			return
+		wg.Add(1)
+		go func(idx int, st string) {
+			defer wg.Done()
+
+			if ctx.Err() != nil {
+				results[idx] = subtaskResult{index: idx, err: fmt.Errorf("cancelled")}
+				return
+			}
+
+			// Mark running
+			o.mu.Lock()
+			ns := o.statuses[nodeID]
+			ns.Subtasks[idx].Status = "running"
+			ns.SubtaskIndex = o.countSubtasksByStatus(ns.Subtasks, "done") + 1
+			o.statuses[nodeID] = ns
+			o.mu.Unlock()
+			o.updateDecomposeMessage(nodeID)
+
+			subtaskLogStream := NewLogStream()
+			// Store per-subtask log stream with a unique key
+			stKey := fmt.Sprintf("%s.st%d", nodeID, idx+1)
+			o.mu.Lock()
+			o.logStreams[stKey] = subtaskLogStream
+			o.mu.Unlock()
+			o.watchLogStream(nodeID, subtaskLogStream)
+
+			subtaskPrompt := expandSubtask(prompt, st, idx+1, total)
+			result, err := runAgent(ctx, subtaskPrompt, node.Config.AllowedTools,
+				workdir, model, o.config.Settings.TimeoutSeconds, subtaskLogStream)
+
+			// Close this subtask's log stream
+			o.mu.Lock()
+			if ls, ok := o.logStreams[stKey]; ok {
+				ls.Close()
+				delete(o.logStreams, stKey)
+			}
+			o.mu.Unlock()
+
+			if err != nil {
+				o.mu.Lock()
+				ns := o.statuses[nodeID]
+				ns.Subtasks[idx].Status = "error"
+				o.statuses[nodeID] = ns
+				o.mu.Unlock()
+				o.updateDecomposeMessage(nodeID)
+				results[idx] = subtaskResult{index: idx, err: err}
+				return
+			}
+
+			// Mark done
+			o.mu.Lock()
+			ns = o.statuses[nodeID]
+			ns.Subtasks[idx].Status = "done"
+			ns.SubtaskIndex = o.countSubtasksByStatus(ns.Subtasks, "done")
+			o.statuses[nodeID] = ns
+			o.mu.Unlock()
+			o.updateDecomposeMessage(nodeID)
+
+			results[idx] = subtaskResult{index: idx, result: result}
+
+			// Write individual subtask log
+			os.WriteFile(filepath.Join(o.logsDir, fmt.Sprintf("%s.st%d.log", nodeID, idx+1)),
+				[]byte(result), 0644)
+		}(i, subtask)
+	}
+	wg.Wait()
+
+	// Build cumulative log and check for errors
+	var cumulativeLog strings.Builder
+	var failed []int
+	for i, r := range results {
+		cumulativeLog.WriteString(fmt.Sprintf("\n\n=== Subtask %d/%d: %s ===\n\n", i+1, total, subtasks[i]))
+		if r.err != nil {
+			cumulativeLog.WriteString(fmt.Sprintf("ERROR: %s\n", r.err))
+			failed = append(failed, i+1)
+		} else {
+			cumulativeLog.WriteString(r.result)
 		}
+	}
+	os.WriteFile(filepath.Join(o.logsDir, nodeID+".log"), []byte(cumulativeLog.String()), 0644)
 
-		idx := i + 1
-
-		// Update subtask progress in status
-		o.mu.Lock()
-		ns := o.statuses[nodeID]
-		ns.SubtaskIndex = idx
-		ns.SubtaskTotal = total
-		ns.SubtaskLabel = subtask
-		o.statuses[nodeID] = ns
-		o.mu.Unlock()
-		o.setStatus(nodeID, "running", fmt.Sprintf("Subtask %d/%d — %s", idx, total, subtask))
-
-		// Fresh log stream per subtask
-		subtaskLogStream := NewLogStream()
-		o.mu.Lock()
-		o.logStreams[nodeID] = subtaskLogStream
-		o.mu.Unlock()
-
-		// Expand subtask variables in the prompt
-		subtaskPrompt := expandSubtask(prompt, subtask, idx, total)
-
-		result, err := runAgent(ctx, subtaskPrompt, node.Config.AllowedTools,
-			workdir, model, o.config.Settings.TimeoutSeconds, subtaskLogStream)
-
-		if err != nil {
-			o.setStatus(nodeID, "error", fmt.Sprintf("Subtask %d/%d failed: %s", idx, total, err.Error()))
-			os.WriteFile(filepath.Join(o.logsDir, nodeID+".error.log"),
-				[]byte(err.Error()), 0644)
-			return
-		}
-
-		// Append to cumulative log
-		cumulativeLog.WriteString(fmt.Sprintf("\n\n=== Subtask %d/%d: %s ===\n\n", idx, total, subtask))
-		cumulativeLog.WriteString(result)
-
-		// Write cumulative log after each subtask
-		os.WriteFile(filepath.Join(o.logsDir, nodeID+".log"), []byte(cumulativeLog.String()), 0644)
+	if len(failed) > 0 {
+		o.setStatus(nodeID, "error", fmt.Sprintf("%d/%d subtasks failed", len(failed), total))
+		return
 	}
 
 	// Deliver artifacts
@@ -333,7 +397,7 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 		ls.Close()
 		delete(o.logStreams, nodeID)
 	}
-	ns := o.statuses[nodeID]
+	ns = o.statuses[nodeID]
 	ns.SubtaskIndex = total
 	ns.SubtaskTotal = total
 	ns.SubtaskLabel = "All complete"
@@ -341,6 +405,34 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 	o.mu.Unlock()
 
 	o.setStatus(nodeID, "done", fmt.Sprintf("Complete (%d subtasks)", total))
+}
+
+// updateDecomposeMessage updates the node message based on subtask statuses.
+func (o *Orchestrator) updateDecomposeMessage(nodeID string) {
+	o.mu.Lock()
+	ns := o.statuses[nodeID]
+	running := o.countSubtasksByStatus(ns.Subtasks, "running")
+	done := o.countSubtasksByStatus(ns.Subtasks, "done")
+	errored := o.countSubtasksByStatus(ns.Subtasks, "error")
+	total := len(ns.Subtasks)
+	ns.Message = fmt.Sprintf("%d running · %d done · %d error — %d total", running, done, errored, total)
+	ns.Status = "running"
+	o.statuses[nodeID] = ns
+	data, _ := json.MarshalIndent(o.statuses, "", "  ")
+	os.WriteFile(filepath.Join(o.runDir, "status.json"), data, 0644)
+	o.broadcast()
+	o.mu.Unlock()
+}
+
+// countSubtasksByStatus counts subtasks with a given status.
+func (o *Orchestrator) countSubtasksByStatus(subtasks []SubtaskStatus, status string) int {
+	count := 0
+	for _, s := range subtasks {
+		if s.Status == status {
+			count++
+		}
+	}
+	return count
 }
 
 // isReviewerNode checks if a node is a reviewer by its label.

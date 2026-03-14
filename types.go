@@ -83,16 +83,23 @@ type Question struct {
 
 // ── Run status ──────────────────────────────
 
+type SubtaskStatus struct {
+	Index  int    `json:"index"`
+	Label  string `json:"label"`
+	Status string `json:"status"` // pending, running, done, error
+}
+
 type NodeStatus struct {
-	Status        string     `json:"status"`
-	Message       string     `json:"message"`
-	StartedAt     float64    `json:"started_at,omitempty"`
-	Elapsed       int        `json:"elapsed"`
-	Questions     []Question `json:"questions,omitempty"`
-	QuestionRound int        `json:"question_round,omitempty"`
-	RetryAttempt  int        `json:"retry_attempt,omitempty"`
-	ReviewRound   int        `json:"review_round,omitempty"`
-	SubtaskIndex  int        `json:"subtask_index,omitempty"`
-	SubtaskTotal  int        `json:"subtask_total,omitempty"`
-	SubtaskLabel  string     `json:"subtask_label,omitempty"`
+	Status        string           `json:"status"`
+	Message       string           `json:"message"`
+	StartedAt     float64          `json:"started_at,omitempty"`
+	Elapsed       int              `json:"elapsed"`
+	Questions     []Question       `json:"questions,omitempty"`
+	QuestionRound int              `json:"question_round,omitempty"`
+	RetryAttempt  int              `json:"retry_attempt,omitempty"`
+	ReviewRound   int              `json:"review_round,omitempty"`
+	SubtaskIndex  int              `json:"subtask_index,omitempty"`
+	SubtaskTotal  int              `json:"subtask_total,omitempty"`
+	SubtaskLabel  string           `json:"subtask_label,omitempty"`
+	Subtasks      []SubtaskStatus  `json:"subtasks,omitempty"`
 }
