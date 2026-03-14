@@ -116,11 +116,5 @@ func runAgent(ctx context.Context, prompt string, tools []string, workdir string
 		return "", fmt.Errorf("%s", errMsg)
 	}
 
-	// Write final log file
-	if logStream != nil {
-		// Ensure log file has full output
-		os.WriteFile(workdir+"/.clor-last-output", stdout.Bytes(), 0644)
-	}
-
 	return strings.TrimSpace(stdout.String()), nil
 }

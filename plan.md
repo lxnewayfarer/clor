@@ -1,58 +1,38 @@
-# Plan: UI Freezes & Missing Live Status During Pipeline Run
+# Plan: Fix leftover files in project directories
 
-## Root Cause Analysis
+## Problem
 
-### Bug 1 — UI "freezes" at start (architect занят, нет обновлений)
+After a pipeline run, two files may remain in the user's project directory:
 
-**Symptom:** UI freezes after clicking Run; no node updates visible until the architect finishes and produces Plan.md.
+1. **`plan.md`** — created by the Architect agent (its prompt instructs it to write there). Nodes have a `TempFiles` field for cleanup, but the Architect preset doesn't populate it by default, so the file is never cleaned up.
 
-**Root cause:** The elapsed counter in `applyStatuses` is driven **only by SSE events**. The orchestrator calls `broadcast()` only when a status *changes* — i.e., when agent output arrives via `watchLogStream`. If the agent is silently running (no stdout for a while), no SSE events fire, and the frontend shows nothing new. The `elapsed` field is only recalculated server-side **on each broadcast**; if there is no broadcast, `elapsed` stays at `0s` in the last snapshot.
+2. **`.clor-last-output`** — written by `agent.go:122` unconditionally to `workdir+"/.clor-last-output"` after every successful agent run. This is a debug artifact with no cleanup logic at all.
 
-Additionally, for the "running 0s" issue: `s.elapsed` is 0 until the *first* `broadcast()` that happens after `StartedAt` is set. If there's a gap between `setStatus("running")` and the first log line, `elapsed` shows `0s`.
+## Root causes
 
-### Bug 2 — Coder shows "0s", unclear if running
+### `.clor-last-output`
+In `agent.go` line 122:
+```go
+os.WriteFile(workdir+"/.clor-last-output", stdout.Bytes(), 0644)
+```
+This writes the full agent stdout to the project directory on every run. It was likely added for debugging. The output is already captured in the proper log file under `~/.config/clor/runs/{runID}/logs/{nodeID}.log`. The `.clor-last-output` file is redundant and has no cleanup.
 
-**Symptom:** Coder node shows `running 0s` indefinitely with no progress visible.
+### `plan.md`
+The Architect agent prompt says "Write the full plan to plan.md". The `TempFiles` mechanism exists in `orchestrator.go` (`cleanupTempFiles()`) but the Architect node preset in `web/index.html` doesn't set `temp_files: ["plan.md"]` by default, so the file is never removed.
 
-**Root causes:**
-1. Same as above — `elapsed` only updates when a new SSE event fires (i.e., when a log line arrives).
-2. In `decompose` mode: subtasks run **sequentially** one by one with a single progress bar, but the node label still says `running 0s` if no output from the current subtask has arrived yet.
-3. No client-side timer to increment `elapsed` independently of server events.
+## Solution
 
-### Bug 3 — No indication of parallel execution
+### Fix 1: Remove `.clor-last-output` entirely
+The output is already stored in the proper run log (`logsDir/nodeID.log`). There is no need to also write it to the project workdir. Delete this line from `agent.go`.
 
-**Symptom:** When multiple coder nodes run in parallel within a wave, UI doesn't make it obvious.
+### Fix 2: Add `plan.md` to Architect preset's TempFiles
+In `web/index.html`, the Architect node preset should include `temp_files: ["plan.md"]` so the orchestrator's existing `cleanupTempFiles()` mechanism removes it after the run completes.
 
-**Root cause:** The current status display is purely text-based. Nodes in the same wave all show `running Xs`, but there's no visual grouping or "N agents running in parallel" indicator.
-
----
-
-## Architecture of the Fix
-
-### Fix A — Client-side elapsed ticker (no server changes needed)
-
-The frontend should maintain a local `startedAt` map per node and use `setInterval` to increment the elapsed display every second, independent of SSE events. SSE updates sync the `startedAt` value; the ticker handles the visual increment.
-
-### Fix B — Heartbeat broadcast in orchestrator
-
-For nodes that produce infrequent output (architect thinking deeply), the orchestrator should send a periodic heartbeat `broadcast()` every ~2 seconds so the SSE stream stays alive and `elapsed` updates.
-
-### Fix C — "Running agents" counter in header
-
-Show a real-time counter like `2 agents running in parallel` in the run-status bar when multiple nodes are in `running` state simultaneously.
-
-### Fix D — Better initial status transition
-
-When a node transitions to `running`, immediately broadcast with `elapsed=0` so the frontend sees the state change without waiting for the first log line.
-
----
+## Architectural constraints
+- No new abstractions needed — the `TempFiles` cleanup mechanism already exists and works.
+- The run logs (`~/.config/clor/runs/`) are already the canonical store for agent output. Removing `.clor-last-output` does not lose any information.
+- `cleanupTempFiles()` is called at the end of every run in `orchestrator.go:105`, so Fix 2 requires only a data change in the preset definition.
 
 ## Subtasks
-
-1. **[frontend]** Add client-side elapsed ticker: maintain a `nodeStartTimes` map, update it from SSE/poll events, and run a `setInterval` every 1s to re-render elapsed for all `running` nodes without waiting for new SSE events.
-
-2. **[backend]** Add heartbeat goroutine in `executeNode`: when a node is running, broadcast a status update every 2 seconds so SSE clients receive fresh `elapsed` values even if the agent produces no output.
-
-3. **[frontend]** Add "N agents running" indicator: in `applyStatuses`, count nodes with `status === 'running'` and display `N agent(s) running` in the `#run-status` element alongside the run ID.
-
-4. **[frontend]** Fix "running 0s" on first render: when `s.elapsed === 0` and `s.status === 'running'`, show `running ...` or `running <1s` instead of `running 0s` to avoid the confusing frozen zero.
+1. Remove the `.clor-last-output` write from `agent.go:122` (the `os.WriteFile` call and its surrounding `if logStream != nil` block, keeping the return statement)
+2. Add `temp_files: ["plan.md"]` to the Architect node preset definition in `web/index.html`

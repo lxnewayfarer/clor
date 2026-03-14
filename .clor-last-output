@@ -1,8 +1,5 @@
-Builds clean. Here's what was added:
+Both fixes are done:
 
-**`startHeartbeat`** — a new method on `Orchestrator` that launches a goroutine ticking every 2 seconds. On each tick it:
-1. Checks if the node is still `running` (exits otherwise)
-2. Recalculates `ns.Elapsed` from `StartedAt`
-3. Calls `broadcast()` so SSE clients get a fresh elapsed value
+1. **`agent.go`** — removed the `os.WriteFile(workdir+"/.clor-last-output", ...)` block entirely. Agent output is already stored in the proper run log.
 
-**Called** immediately after `setStatus(nodeID, "running", "Working...")` in `executeNode`, so the heartbeat starts as soon as a node enters the running state. The goroutine self-terminates when the node leaves `running` (done/error/cancelled) or when `ctx` is cancelled.
+2. **`web/index.html`** — added `tempFiles:['plan.md']` to the Architect preset using camelCase (matching how the UI stores node data), so new Architect nodes will have `plan.md` pre-populated in the temp files field and the orchestrator's `cleanupTempFiles()` will remove it after the run.
