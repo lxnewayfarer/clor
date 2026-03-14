@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -199,7 +200,10 @@ func handleValidate(w http.ResponseWriter, r *http.Request) {
 
 // ── Runs ────────────────────────────────────
 
-var activeRuns = make(map[string]*RunHandle)
+var (
+	activeRuns   = make(map[string]*RunHandle)
+	activeRunsMu sync.RWMutex
+)
 
 type RunHandle struct {
 	Cancel func()
@@ -215,10 +219,14 @@ func handleStartRun(w http.ResponseWriter, r *http.Request) {
 	runID := generateID()
 	orch := NewOrchestrator(config, runID)
 	ctx, cancel := contextWithCancel()
+	activeRunsMu.Lock()
 	activeRuns[runID] = &RunHandle{Cancel: cancel, Orch: orch}
+	activeRunsMu.Unlock()
 	go func() {
 		orch.Run(ctx)
+		activeRunsMu.Lock()
 		delete(activeRuns, runID)
+		activeRunsMu.Unlock()
 	}()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"run_id": runID})
@@ -269,7 +277,9 @@ func handleRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	activeRunsMu.RLock()
 	rh, ok := activeRuns[id]
+	activeRunsMu.RUnlock()
 	if !ok {
 		http.Error(w, "run not found", 404)
 		return
@@ -312,7 +322,10 @@ func handleStopRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", 400)
 		return
 	}
-	if rh, ok := activeRuns[id]; ok {
+	activeRunsMu.RLock()
+	rh, ok := activeRuns[id]
+	activeRunsMu.RUnlock()
+	if ok {
 		rh.Cancel()
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -349,7 +362,9 @@ func handleNodeLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	activeRunsMu.RLock()
 	rh, ok := activeRuns[id]
+	activeRunsMu.RUnlock()
 	if !ok {
 		http.Error(w, "run not found", 404)
 		return
@@ -393,7 +408,9 @@ func handleRetryNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	activeRunsMu.RLock()
 	rh, ok := activeRuns[id]
+	activeRunsMu.RUnlock()
 	if !ok {
 		http.Error(w, "run not found", 404)
 		return
@@ -408,7 +425,9 @@ func handleSubmitAnswer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	nodeId := r.PathValue("nodeId")
 
+	activeRunsMu.RLock()
 	rh, ok := activeRuns[id]
+	activeRunsMu.RUnlock()
 	if !ok {
 		http.Error(w, "run not found", 404)
 		return
