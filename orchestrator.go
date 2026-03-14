@@ -728,6 +728,11 @@ func (o *Orchestrator) setStatus(nodeID, status, message string) {
 	ns := o.statuses[nodeID]
 	ns.Status = status
 	ns.Message = message
+	if ns.Label == "" {
+		if n, ok := o.nodesMap[nodeID]; ok && n.Label != "" {
+			ns.Label = n.Label
+		}
+	}
 	if status == "running" && ns.StartedAt == 0 {
 		ns.StartedAt = float64(time.Now().Unix())
 	}

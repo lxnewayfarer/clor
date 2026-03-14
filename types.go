@@ -93,6 +93,7 @@ type SubtaskStatus struct {
 
 type NodeStatus struct {
 	Status        string           `json:"status"`
+	Label         string           `json:"label,omitempty"`
 	Message       string           `json:"message"`
 	StartedAt     float64          `json:"started_at,omitempty"`
 	Elapsed       int              `json:"elapsed"`

@@ -1452,8 +1452,13 @@ function applyStatuses(statuses) {
     if (s.status === 'running' && currentRunId) {
       const dfId = getDfIdByNodeId(nodeId);
       const nodeInfo = dfId ? editor.getNodeFromId(dfId) : null;
-      const label = nodeInfo ? (nodeInfo.data.icon || '') + ' ' + (nodeInfo.data.label || nodeId) : nodeId;
-      openLogTab(nodeId, label.trim());
+      let label;
+      if (nodeInfo) {
+        label = ((nodeInfo.data.icon || '') + ' ' + (nodeInfo.data.label || s.label || nodeId)).trim();
+      } else {
+        label = s.label || nodeId;
+      }
+      openLogTab(nodeId, label);
     } else if ((s.status === 'done' || s.status === 'error') && logTabs.has(nodeId)) {
       const tab = logTabs.get(nodeId);
       const spinner = tab.btnEl.querySelector('.tab-spinner');
@@ -1527,13 +1532,13 @@ function applyStatuses(statuses) {
     }
 
     if (s.status === 'waiting_for_input' && s.questions && s.questions.length > 0) {
-      waitingNode = {nodeId, questions: s.questions, round: s.question_round};
+      waitingNode = {nodeId, label: s.label, questions: s.questions, round: s.question_round};
     }
     if (s.status !== 'done' && s.status !== 'error') allDone = false;
   });
 
   if (waitingNode) {
-    showQuestionForm(waitingNode.nodeId, waitingNode.questions, waitingNode.round);
+    showQuestionForm(waitingNode.nodeId, waitingNode.label, waitingNode.questions, waitingNode.round);
   }
 
   updateActivityFeed(statuses);
@@ -1576,13 +1581,13 @@ function updateActivityFeed(statuses) {
     const msg = s.message || '';
 
     // Get node label and color from drawflow data
-    let label = nodeId;
+    let label = s.label || nodeId;
     let color = 'var(--text3)';
     const dfId = getDfIdByNodeId(nodeId);
     if (dfId) {
       const info = getNodeDataDirect(dfId);
       if (info && info.data) {
-        label = info.data.label || nodeId;
+        label = info.data.label || s.label || nodeId;
         color = info.data.projectColor || 'var(--text3)';
       }
     }
@@ -1622,7 +1627,7 @@ function getDfIdByNodeId(nodeId) {
 
 let activeQuestionNodeId = null;
 
-function showQuestionForm(nodeId, questions, round) {
+function showQuestionForm(nodeId, label, questions, round) {
   // Don't re-render if already showing for same node+round
   if (activeQuestionNodeId === nodeId + '_' + round) return;
   activeQuestionNodeId = nodeId + '_' + round;
@@ -1635,7 +1640,7 @@ function showQuestionForm(nodeId, questions, round) {
 
   let html = '<div class="question-form">';
   html += '<div style="color:var(--purple);font-weight:500;margin-bottom:6px">';
-  html += '\u2753 ' + esc(nodeId) + ' has questions (round ' + round + '):</div>';
+  html += '\u2753 ' + esc(label || nodeId) + ' has questions (round ' + round + '):</div>';
   questions.forEach((q, i) => {
     html += '<div class="q-item">';
     html += '<label>' + (i+1) + '. ' + esc(q.text) + '</label>';
@@ -2552,7 +2557,7 @@ async function showRunDetail(r) {
       const elapsed = ns.elapsed_ms ? (ns.elapsed_ms / 1000).toFixed(1) + 's' : '—';
       const msg = ns.message ? esc(ns.message).slice(0, 80) + (ns.message.length > 80 ? '…' : '') : '';
       html += '<tr>' +
-        '<td class="rd-node-name">' + esc(nodeId) + '</td>' +
+        '<td class="rd-node-name">' + esc(ns.label || nodeId) + '</td>' +
         '<td style="color:' + statusColor + ';font-weight:500">' + esc(ns.status || '—') + '</td>' +
         '<td style="color:var(--text3)">' + elapsed + '</td>' +
         '<td style="color:var(--text3)">' + msg + '</td>' +
