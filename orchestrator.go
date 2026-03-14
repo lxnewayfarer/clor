@@ -219,7 +219,11 @@ func (o *Orchestrator) SubmitAnswer(nodeID string, answers []Question) bool {
 func (o *Orchestrator) expandPrompt(prompt string, workdir string) string {
 	taskNode := findByType(o.config.Nodes, "task")
 	if taskNode != nil {
-		prompt = strings.ReplaceAll(prompt, "{task}", taskNode.Config.Description)
+		taskText := taskNode.Config.Text
+		if taskText == "" {
+			taskText = taskNode.Config.Description // backward compat
+		}
+		prompt = strings.ReplaceAll(prompt, "{task}", taskText)
 	}
 	prompt = expandReadVars(prompt, workdir, o.projects)
 	prompt = expandFilesVars(prompt, workdir)

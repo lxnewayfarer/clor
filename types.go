@@ -39,6 +39,7 @@ type NodeConfig struct {
 }
 
 type NodeDetail struct {
+	Text              string           `json:"text,omitempty"`
 	Description       string           `json:"description,omitempty"`
 	ProjectID         string           `json:"project_id,omitempty"`
 	ProjectIDs        []string         `json:"project_ids,omitempty"`

@@ -86,6 +86,9 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .node-label{font-size:13px;font-weight:500;flex:1}
 .node-project-pill{font-size:10px;padding:1px 6px;border-radius:6px;font-weight:500}
 .node-tools{display:flex;flex-wrap:wrap;gap:2px}
+.node-projects{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.node-inner.no-project{border-right:2px solid var(--red)}
+.node-no-project-warn{font-size:10px;color:var(--red);opacity:.7}
 .tool-pill{font-size:10px;padding:1px 5px;background:var(--bg4);border-radius:3px;color:var(--text2)}
 .node-desc{font-size:12px;color:var(--text2);margin-top:2px;max-height:36px;overflow:hidden}
 .node-status{font-size:11px;margin-top:4px}
@@ -187,6 +190,7 @@ const PRESETS = [
   {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the code changes described in {task}.'},
   {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.'},
   {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],prompt:'Summarize what was built for {task}. Read all changed files and produce a final report.'},
+  {type:'agent',icon:'\u{1F4E6}',label:'Committer',tools:['Bash'],prompt:'You are a git committer agent. Stage all changes, create a descriptive commit message based on {task}, commit and push to the current branch.\n\nRun:\ngit add -A\ngit commit -m "<descriptive message based on the task>"\ngit push'},
   {type:'task',icon:'\u{1F4CC}',label:'Task'},
 ];
 const ALL_TOOLS = ['Read','Write','Edit','Bash','Glob','Grep'];
@@ -205,22 +209,25 @@ editor.start();
 function nodeHTML(data) {
   const pc = data.projectColor || 'var(--text3)';
   const pa = data.projectAlias || '';
+  const hasProject = (data.projectIds||[]).length > 0 || !!pa;
+  const noProjClass = hasProject ? '' : ' no-project';
   const pills = (data.projectIds||[]).length > 0
     ? (data.projectIds||[]).map(pid => { const p = projects.find(x=>x.id===pid); return p ? '<span class="node-project-pill" style="background:'+p.color+'18;color:'+p.color+'">'+p.alias+'</span>' : ''; }).join(' ')
-    : (pa ? '<span class="node-project-pill" style="background:'+pc+'18;color:'+pc+'">'+pa+'</span>' : '');
+    : (pa ? '<span class="node-project-pill" style="background:'+pc+'18;color:'+pc+'">'+pa+'</span>' : '<span class="node-no-project-warn">no project</span>');
   const tools = (data.tools||[]).map(t => '<span class="tool-pill">'+t+'</span>').join('');
   const status = '<div class="node-status" id="ns-'+data.nodeId+'"></div>';
   const delBtn = '<button class="node-delete-btn" onclick="deleteNodeBtn(\''+data.nodeId+'\',event)" title="Delete node">&times;</button>';
   const playBtn = data.type !== 'task' ? '<button class="node-play-btn" onclick="runFromNode(\''+data.nodeId+'\',event)" title="Run from here">&#9654;</button>' : '';
 
-  if (data.type === 'task') return '<div class="node-inner" style="border-left:3px solid var(--green)">' + delBtn +
+  if (data.type === 'task') return '<div class="node-inner'+noProjClass+'" style="border-left:3px solid var(--green)">' + delBtn +
     '<div class="node-header"><span class="node-icon">\u{1F4CC}</span><span class="node-label">'+(data.label||'Task')+'</span></div>' +
-    '<div class="node-desc">'+(data.description||'click to edit').slice(0,80)+'</div>'+status+'</div>';
+    '<div class="node-desc">'+(data.text||'click to edit').slice(0,80)+'</div><div class="node-projects">'+pills+'</div>'+status+'</div>';
 
-  return '<div class="node-inner" style="border-left:3px solid '+pc+'">' + playBtn + delBtn +
+  return '<div class="node-inner'+noProjClass+'" style="border-left:3px solid '+pc+'">' + playBtn + delBtn +
     '<div class="node-header"><span class="node-icon">'+(data.icon||'\u2699\uFE0F')+'</span>' +
-    '<span class="node-label">'+(data.label||'Agent')+'</span>'+pills+'</div>' +
-    '<div class="node-tools">'+tools+'</div>'+status+'</div>';
+    '<span class="node-label">'+(data.label||'Agent')+'</span></div>' +
+    '<div class="node-tools">'+tools+'</div>' +
+    '<div class="node-projects">'+pills+'</div>'+status+'</div>';
 }
 
 // ── ADD NODE ───────────────────────────────
@@ -229,6 +236,13 @@ function addNode(preset, posX, posY) {
   const id = preset.type + '_' + nodeCounter;
   const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectIds:[], projectColor:'', projectAlias:'', model: preset.model || 'claude-sonnet-4-6'});
   if (preset.description) data.description = preset.description;
+  // Auto-assign project if exactly one exists
+  if (projects.length === 1) {
+    data.projectId = projects[0].id;
+    data.projectIds = [projects[0].id];
+    data.projectColor = projects[0].color;
+    data.projectAlias = projects[0].alias;
+  }
 
   const inputs = preset.type === 'task' ? 0 : 1;
   const outputs = 1;
@@ -422,20 +436,41 @@ function showConfigPanel(dfId) {
   html += '<label>Label</label><input id="cf-label" value="'+esc(d.label||'')+'" />';
 
   if (d.type === 'task') {
-    html += '<label>Description</label><textarea id="cf-desc" rows="6">'+ esc(d.description||'')+'</textarea>';
+    html += '<label>Text</label><textarea id="cf-text" rows="6">'+ esc(d.text||'')+'</textarea>';
     html += '<div class="hint">Use this to define the task for the pipeline</div>';
+
+    // Project (single dropdown for task)
+    if (!d.projectIds) d.projectIds = d.projectId ? [d.projectId] : [];
+    html += '<label>Project <span style="color:var(--red)">*</span></label><select id="cf-project-single">';
+    html += '<option value="">— select project —</option>';
+    projects.forEach(p => {
+      const sel = (d.projectIds[0] === p.id) ? ' selected' : '';
+      html += '<option value="'+p.id+'"'+sel+'>'+esc(p.alias)+'</option>';
+    });
+    html += '</select>';
   } else {
     // Description for agents too
     html += '<label>Description</label><textarea id="cf-desc" rows="3">'+ esc(d.description||'')+'</textarea>';
 
-    // Projects (multiple)
+    // Projects: Architect gets multi-select, others get single dropdown
     if (!d.projectIds) d.projectIds = d.projectId ? [d.projectId] : [];
-    html += '<label>Projects</label><div id="cf-projects" class="tools-grid">';
-    projects.forEach(p => {
-      const checked = d.projectIds.includes(p.id) ? ' checked' : '';
-      html += '<label class="tool-check"><input type="checkbox" data-proj="'+p.id+'"'+checked+'> <span class="project-dot" style="background:'+p.color+';display:inline-block;width:8px;height:8px;border-radius:50%"></span> '+esc(p.alias)+'</label>';
-    });
-    html += '</div>';
+    const isArchitect = (d.label||'').toLowerCase() === 'architect';
+    if (isArchitect) {
+      html += '<label>Projects <span style="color:var(--red)">*</span></label><div id="cf-projects" class="tools-grid">';
+      projects.forEach(p => {
+        const checked = d.projectIds.includes(p.id) ? ' checked' : '';
+        html += '<label class="tool-check"><input type="checkbox" data-proj="'+p.id+'"'+checked+'> <span class="project-dot" style="background:'+p.color+';display:inline-block;width:8px;height:8px;border-radius:50%"></span> '+esc(p.alias)+'</label>';
+      });
+      html += '</div>';
+    } else {
+      html += '<label>Project <span style="color:var(--red)">*</span></label><select id="cf-project-single">';
+      html += '<option value="">— select project —</option>';
+      projects.forEach(p => {
+        const sel = (d.projectIds[0] === p.id) ? ' selected' : '';
+        html += '<option value="'+p.id+'"'+sel+'>'+esc(p.alias)+'</option>';
+      });
+      html += '</select>';
+    }
 
     // Prompt
     html += '<label>Prompt</label><textarea id="cf-prompt" rows="8">'+esc(d.prompt||'')+'</textarea>';
@@ -482,13 +517,31 @@ function showConfigPanel(dfId) {
     updateNodeHTML(dfId);
   });
 
+  const textInput = document.getElementById('cf-text');
+  if (textInput) textInput.addEventListener('input', () => {
+    info.data.text = textInput.value;
+    updateNodeHTML(dfId);
+  });
+
   const descInput = document.getElementById('cf-desc');
   if (descInput) descInput.addEventListener('input', () => {
     info.data.description = descInput.value;
     updateNodeHTML(dfId);
   });
 
-  // Multi-project checkboxes
+  // Single project dropdown
+  const projSingle = document.getElementById('cf-project-single');
+  if (projSingle) projSingle.addEventListener('change', () => {
+    const pid = projSingle.value;
+    const proj = projects.find(x => x.id === pid);
+    info.data.projectIds = pid ? [pid] : [];
+    info.data.projectId = pid || '';
+    info.data.projectColor = proj ? proj.color : '';
+    info.data.projectAlias = proj ? proj.alias : '';
+    updateNodeHTML(dfId);
+  });
+
+  // Multi-project checkboxes (Architect)
   content.querySelectorAll('[data-proj]').forEach(cb => {
     cb.addEventListener('change', () => {
       const ids = [];
@@ -620,11 +673,11 @@ function renderModalProjects() {
   const container = document.getElementById('modal-project-list');
   container.innerHTML = '';
   projects.forEach((p, i) => {
-    container.innerHTML += '<div class="modal-row">' +
+    container.innerHTML += '<div class="modal-row" style="flex-wrap:wrap">' +
       '<input type="color" value="'+(p.color||'#6e78ff')+'" data-idx="'+i+'" class="mp-color" />' +
       '<input placeholder="alias" value="'+esc(p.alias||'')+'" data-idx="'+i+'" class="mp-alias" style="width:80px" />' +
       '<input placeholder="/path/to/project" value="'+esc(p.path||'')+'" data-idx="'+i+'" class="mp-path" />' +
-      '<button onclick="removeProject('+i+')" style="color:var(--red);border:none;background:none">x</button>' +
+      '<textarea placeholder="description" data-idx="'+i+'" class="mp-desc" rows="2" style="width:100%;margin-top:4px;font-size:12px">'+esc(p.description||'')+'</textarea>' +
       '</div>';
   });
 }
@@ -634,16 +687,13 @@ function addProjectRow() {
   renderModalProjects();
 }
 
-function removeProject(i) {
-  projects.splice(i, 1);
-  renderModalProjects();
-}
 
 async function saveProjects() {
   // Read values from modal inputs
   document.querySelectorAll('.mp-alias').forEach(el => { projects[+el.dataset.idx].alias = el.value; });
   document.querySelectorAll('.mp-path').forEach(el => { projects[+el.dataset.idx].path = el.value; });
   document.querySelectorAll('.mp-color').forEach(el => { projects[+el.dataset.idx].color = el.value; });
+  document.querySelectorAll('.mp-desc').forEach(el => { projects[+el.dataset.idx].description = el.value; });
 
   await fetch('/api/projects', {
     method: 'POST',
@@ -664,22 +714,24 @@ function buildPipelineJSON() {
   Object.keys(module).forEach(dfId => {
     const n = module[dfId];
     const d = n.data;
+    const cfg = {
+      description: d.description || '',
+      project_id: d.projectId || '',
+      project_ids: d.projectIds || (d.projectId ? [d.projectId] : []),
+      prompt: d.prompt || '',
+      allowed_tools: d.tools || [],
+      model: d.model || '',
+      output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
+      interactive: d.interactive || false,
+      max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
+    };
+    if (d.type === 'task') cfg.text = d.text || '';
     nodes.push({
       id: d.nodeId,
       type: d.type,
       label: d.label || '',
       pos: {x: n.pos_x, y: n.pos_y},
-      config: {
-        description: d.description || '',
-        project_id: d.projectId || '',
-        project_ids: d.projectIds || (d.projectId ? [d.projectId] : []),
-        prompt: d.prompt || '',
-        allowed_tools: d.tools || [],
-        model: d.model || '',
-        output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
-        interactive: d.interactive || false,
-        max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
-      }
+      config: cfg
     });
 
     // Collect edges from outputs
@@ -757,6 +809,7 @@ async function loadPipeline(name) {
         tools: n.config.allowed_tools || [],
         prompt: n.config.prompt || '',
         description: n.config.description || '',
+        text: n.config.text || '',
         model: n.config.model || n.config.model_override || '',
         outputArtifacts: n.config.output_artifacts || [],
         interactive: n.config.interactive || false,
@@ -767,6 +820,10 @@ async function loadPipeline(name) {
         projectColor: proj ? proj.color : '',
         projectAlias: proj ? proj.alias : '',
       };
+      // Backward compat: if task node has description but no text, migrate
+      if (n.type === 'task' && !data.text && data.description) {
+        data.text = data.description;
+      }
 
       const inputs = n.type === 'task' ? 0 : 1;
       const outputs = 1;
@@ -1023,6 +1080,7 @@ function importJSON() {
           tools: n.config.allowed_tools || [],
           prompt: n.config.prompt || '',
           description: n.config.description || '',
+          text: n.config.text || '',
           model: n.config.model || n.config.model_override || '',
           outputArtifacts: n.config.output_artifacts || [],
           interactive: n.config.interactive || false,
@@ -1033,6 +1091,10 @@ function importJSON() {
           projectColor: proj ? proj.color : '',
           projectAlias: proj ? proj.alias : '',
         };
+        // Backward compat: if task node has description but no text, migrate
+        if (n.type === 'task' && !data.text && data.description) {
+          data.text = data.description;
+        }
         const inputs = n.type === 'task' ? 0 : 1;
         const outputs = 1;
         const px = n.pos ? n.pos.x : 200 + Math.random()*400;
