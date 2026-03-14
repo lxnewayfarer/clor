@@ -127,7 +127,7 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 
 	o.setStatus(nodeID, "running", "Working...")
 
-	prompt := o.expandPrompt(node.Config.Prompt, workdir)
+	prompt := o.expandPromptForNode(nodeID, node.Config.Prompt, workdir)
 	model := node.Config.Model
 	if model == "" {
 		model = o.config.Settings.Model
@@ -426,7 +426,7 @@ func (o *Orchestrator) handleReviewLoop(ctx context.Context, reviewerID string, 
 		o.logStreams[reviewerID] = logStream
 		o.mu.Unlock()
 
-		prompt := o.expandPrompt(reviewer.Config.Prompt, reviewWorkdir)
+		prompt := o.expandPromptForNode(reviewerID, reviewer.Config.Prompt, reviewWorkdir)
 		model := reviewer.Config.Model
 		if model == "" {
 			model = o.config.Settings.Model
@@ -551,14 +551,43 @@ func (o *Orchestrator) cleanupTempFiles() {
 }
 
 func (o *Orchestrator) expandPrompt(prompt string, workdir string) string {
-	taskNode := findByType(o.config.Nodes, "task")
-	if taskNode != nil {
-		taskText := taskNode.Config.Text
-		if taskText == "" {
-			taskText = taskNode.Config.Description // backward compat
+	return o.expandPromptForNode("", prompt, workdir)
+}
+
+func (o *Orchestrator) expandPromptForNode(nodeID, prompt, workdir string) string {
+	var taskText string
+	if nodeID != "" {
+		// Collect texts from all upstream task nodes
+		var parts []string
+		for _, e := range o.config.Edges {
+			if e.Target == nodeID {
+				src := o.nodesMap[e.Source]
+				if src.Type == "task" {
+					t := src.Config.Text
+					if t == "" {
+						t = src.Config.Description
+					}
+					if t != "" {
+						parts = append(parts, t)
+					}
+				}
+			}
 		}
-		prompt = strings.ReplaceAll(prompt, "{task}", taskText)
+		if len(parts) > 0 {
+			taskText = strings.Join(parts, "\n\n")
+		}
 	}
+	// Fallback: first task node in pipeline (backward compat)
+	if taskText == "" {
+		taskNode := findByType(o.config.Nodes, "task")
+		if taskNode != nil {
+			taskText = taskNode.Config.Text
+			if taskText == "" {
+				taskText = taskNode.Config.Description
+			}
+		}
+	}
+	prompt = strings.ReplaceAll(prompt, "{task}", taskText)
 	prompt = expandReadVars(prompt, workdir, o.projects)
 	prompt = expandFilesVars(prompt, workdir)
 	prompt = expandReviewIssues(prompt, workdir)
