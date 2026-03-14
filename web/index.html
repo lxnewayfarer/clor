@@ -1092,7 +1092,7 @@ function buildPipelineJSON() {
       n.outputs[outKey].connections.forEach(conn => {
         const targetNode = module[conn.node];
         if (targetNode) {
-          edges.push({source: d.nodeId, target: targetNode.data.nodeId, source_port: outKey, target_port: conn.input});
+          edges.push({source: d.nodeId, target: targetNode.data.nodeId, source_port: outKey, target_port: conn.output});
         }
       });
     });
