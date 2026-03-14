@@ -18,11 +18,12 @@ type ProjectsFile struct {
 // ── Pipeline config (what the editor produces) ──
 
 type PipelineConfig struct {
-	Version  int              `json:"version"`
-	Name     string           `json:"name"`
-	Settings PipelineSettings `json:"settings"`
-	Nodes    []NodeConfig     `json:"nodes"`
-	Edges    []Edge           `json:"edges"`
+	Version   int              `json:"version"`
+	Name      string           `json:"name"`
+	Settings  PipelineSettings `json:"settings"`
+	Nodes     []NodeConfig     `json:"nodes"`
+	Edges     []Edge           `json:"edges"`
+	StartFrom string           `json:"start_from,omitempty"`
 }
 
 type PipelineSettings struct {

@@ -1,5 +1,49 @@
 package main
 
+// FilterDownstream returns the subgraph reachable from startID (inclusive).
+// Upstream task nodes are included since they are needed for prompt expansion.
+func FilterDownstream(nodes []NodeConfig, edges []Edge, startID string) ([]NodeConfig, []Edge) {
+	children := make(map[string][]string)
+	for _, e := range edges {
+		children[e.Source] = append(children[e.Source], e.Target)
+	}
+
+	reachable := make(map[string]bool)
+	queue := []string{startID}
+	reachable[startID] = true
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, ch := range children[cur] {
+			if !reachable[ch] {
+				reachable[ch] = true
+				queue = append(queue, ch)
+			}
+		}
+	}
+
+	// Include all task nodes (they resolve instantly and provide {task} data)
+	for _, n := range nodes {
+		if n.Type == "task" {
+			reachable[n.ID] = true
+		}
+	}
+
+	var filteredNodes []NodeConfig
+	for _, n := range nodes {
+		if reachable[n.ID] {
+			filteredNodes = append(filteredNodes, n)
+		}
+	}
+	var filteredEdges []Edge
+	for _, e := range edges {
+		if reachable[e.Source] && reachable[e.Target] {
+			filteredEdges = append(filteredEdges, e)
+		}
+	}
+	return filteredNodes, filteredEdges
+}
+
 // ComputeWaves does topological sort and groups independent nodes
 // into waves for parallel execution.
 func ComputeWaves(nodes []NodeConfig, edges []Edge) [][]string {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func configDir() string {
@@ -169,6 +170,9 @@ type RunHandle struct {
 func handleStartRun(w http.ResponseWriter, r *http.Request) {
 	var config PipelineConfig
 	json.NewDecoder(r.Body).Decode(&config)
+	if config.StartFrom != "" {
+		config.Nodes, config.Edges = FilterDownstream(config.Nodes, config.Edges, config.StartFrom)
+	}
 	runID := generateID()
 	orch := NewOrchestrator(config, runID)
 	ctx, cancel := contextWithCancel()
@@ -190,6 +194,21 @@ func handleRunStatus(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{}"))
 		return
 	}
+
+	var statuses map[string]NodeStatus
+	if err := json.Unmarshal(data, &statuses); err == nil {
+		now := float64(time.Now().Unix())
+		for k, s := range statuses {
+			if s.Status == "running" && s.StartedAt > 0 {
+				s.Elapsed = int(now - s.StartedAt)
+				statuses[k] = s
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(statuses)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
 }

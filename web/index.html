@@ -63,8 +63,13 @@ header .spacer{flex:1}
 #config-panel h3{font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
 
 footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--bg2);border-top:1px solid var(--border);height:30px;font-size:12px;color:var(--text2);flex-shrink:0}
-#log-viewer{position:absolute;bottom:30px;left:0;right:0;height:200px;background:var(--bg2);border-top:1px solid var(--border);overflow:auto;font-family:var(--mono);font-size:12px;padding:8px 12px;white-space:pre-wrap;color:var(--text2);z-index:100}
+#log-viewer{height:200px;background:var(--bg2);border-top:1px solid var(--border);overflow:auto;font-family:var(--mono);font-size:12px;padding:8px 12px;white-space:pre-wrap;color:var(--text2);flex-shrink:0}
 #log-viewer.hidden{display:none}
+.resize-handle{background:transparent;z-index:50;flex-shrink:0}
+.resize-handle:hover,.resize-handle.active{background:var(--accent)44}
+.resize-h{width:4px;cursor:col-resize}
+.resize-v{height:4px;cursor:row-resize}
+.resize-v.hidden{display:none}
 
 .drawflow{background:var(--bg)!important;background-image:radial-gradient(var(--border) 1px,transparent 1px)!important;background-size:20px 20px!important}
 .drawflow .drawflow-node{background:var(--bg2);border:1px solid var(--border);border-radius:8px;color:var(--text);min-width:180px;padding:0}
@@ -86,7 +91,9 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .node-status{font-size:11px;margin-top:4px}
 .node-delete-btn{position:absolute;top:4px;right:4px;background:none;border:none;color:var(--text3);font-size:14px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
 .node-delete-btn:hover{color:var(--red);background:none;border:none}
-.drawflow-node:hover .node-delete-btn{opacity:1}
+.node-play-btn{position:absolute;top:4px;right:22px;background:none;border:none;color:var(--green);font-size:11px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
+.node-play-btn:hover{background:var(--green)18;border-radius:3px}
+.drawflow-node:hover .node-delete-btn,.drawflow-node:hover .node-play-btn{opacity:1}
 .s-running{color:var(--amber)}.s-done{color:var(--green)}.s-error{color:var(--red)}.s-queued{color:var(--text3)}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:999}
@@ -129,18 +136,21 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
     <h4>Saved</h4>
     <div id="pipeline-list"></div>
   </aside>
+  <div class="resize-handle resize-h" id="rh-sidebar"></div>
   <main id="canvas"></main>
+  <div class="resize-handle resize-h" id="rh-config"></div>
   <aside id="config-panel" class="hidden">
     <div id="config-content"></div>
   </aside>
 </div>
 
+<div class="resize-handle resize-v hidden" id="rh-logs"></div>
+<pre id="log-viewer" class="hidden"></pre>
 <footer>
   <span id="run-status">idle</span>
   <div class="spacer"></div>
   <button onclick="toggleLogs()">logs</button>
 </footer>
-<pre id="log-viewer" class="hidden"></pre>
 
 <div id="project-modal" class="modal-overlay hidden">
   <div class="modal-body">
@@ -194,15 +204,13 @@ function nodeHTML(data) {
   const tools = (data.tools||[]).map(t => '<span class="tool-pill">'+t+'</span>').join('');
   const status = '<div class="node-status" id="ns-'+data.nodeId+'"></div>';
   const delBtn = '<button class="node-delete-btn" onclick="deleteNodeBtn(\''+data.nodeId+'\',event)" title="Delete node">&times;</button>';
+  const playBtn = data.type !== 'task' ? '<button class="node-play-btn" onclick="runFromNode(\''+data.nodeId+'\',event)" title="Run from here">&#9654;</button>' : '';
 
   if (data.type === 'task') return '<div class="node-inner" style="border-left:3px solid var(--green)">' + delBtn +
     '<div class="node-header"><span class="node-icon">\u{1F4CC}</span><span class="node-label">'+(data.label||'Task')+'</span></div>' +
     '<div class="node-desc">'+(data.description||'click to edit').slice(0,80)+'</div>'+status+'</div>';
 
-  if (data.type === 'report') return '<div class="node-inner" style="border-left:3px solid var(--text3)">' + delBtn +
-    '<div class="node-header"><span class="node-icon">\u{1F3C1}</span><span class="node-label">'+(data.label||'Report')+'</span>'+pills+'</div>'+status+'</div>';
-
-  return '<div class="node-inner" style="border-left:3px solid '+pc+'">' + delBtn +
+  return '<div class="node-inner" style="border-left:3px solid '+pc+'">' + playBtn + delBtn +
     '<div class="node-header"><span class="node-icon">'+(data.icon||'\u2699\uFE0F')+'</span>' +
     '<span class="node-label">'+(data.label||'Agent')+'</span>'+pills+'</div>' +
     '<div class="node-tools">'+tools+'</div>'+status+'</div>';
@@ -216,7 +224,7 @@ function addNode(preset, posX, posY) {
   if (preset.description) data.description = preset.description;
 
   const inputs = preset.type === 'task' ? 0 : 1;
-  const outputs = preset.type === 'report' ? 0 : 1;
+  const outputs = preset?.type === 'report' || n?.type === 'report' ? 0 : 1;
 
   editor.addNode(id, inputs, outputs, posX, posY, '', data, nodeHTML(data));
   return id;
@@ -248,23 +256,90 @@ function deleteNodeBtn(nodeId, event) {
   }
 }
 
-// ── SNAP TO GRID ──────────────────────────
+// ── MAGNETIC SNAP + GUIDE LINES ─────────────
 const GRID_SIZE = 20;
+const SNAP_THRESHOLD = 8;
+
+(function() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.id = 'guide-lines';
+  svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:50';
+  canvasEl.appendChild(svg);
+})();
+
+function updateGuideLines(snapX, snapY, x, y, w, h) {
+  const svg = document.getElementById('guide-lines');
+  if (!svg) return;
+  svg.innerHTML = '';
+  const z = editor.zoom;
+  const pc = editor.precanvas;
+  const tx = pc ? parseFloat(pc.style.transform?.match(/translate\(([-\d.]+)px/)?.[1] || 0) : 0;
+  const ty = pc ? parseFloat(pc.style.transform?.match(/,\s*([-\d.]+)px/)?.[1] || 0) : 0;
+  if (snapX !== null) {
+    const lx = (x + w/2) * z + tx;
+    svg.innerHTML += '<line x1="'+lx+'" y1="0" x2="'+lx+'" y2="100%" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>';
+  }
+  if (snapY !== null) {
+    const ly = (y + h/2) * z + ty;
+    svg.innerHTML += '<line x1="0" y1="'+ly+'" x2="100%" y2="'+ly+'" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4,4" opacity="0.5"/>';
+  }
+}
+
 editor.on('nodeMoved', function(dfId) {
   const node = editor.getNodeFromId(dfId);
   if (!node) return;
-  const snappedX = Math.round(node.pos_x / GRID_SIZE) * GRID_SIZE;
-  const snappedY = Math.round(node.pos_y / GRID_SIZE) * GRID_SIZE;
-  if (snappedX !== node.pos_x || snappedY !== node.pos_y) {
-    const el = canvasEl.querySelector('#node-'+dfId);
-    if (el) {
-      el.style.left = snappedX + 'px';
-      el.style.top = snappedY + 'px';
-      node.pos_x = snappedX;
-      node.pos_y = snappedY;
-      editor.updateConnectionNodes('node-'+dfId);
-    }
+  const el = canvasEl.querySelector('#node-'+dfId);
+  if (!el) return;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+
+  let nx = node.pos_x;
+  let ny = node.pos_y;
+  const nCx = nx + w/2, nCy = ny + h/2;
+  const nRight = nx + w, nBottom = ny + h;
+
+  let snapX = null, snapY = null;
+
+  const exp = editor.export().drawflow.Home.data;
+  Object.keys(exp).forEach(otherId => {
+    if (otherId == dfId) return;
+    const other = exp[otherId];
+    const oel = canvasEl.querySelector('#node-'+otherId);
+    if (!oel) return;
+    const ow = oel.offsetWidth, oh = oel.offsetHeight;
+    const ox = other.pos_x, oy = other.pos_y;
+    const oCx = ox + ow/2, oCy = oy + oh/2;
+
+    if (snapX === null && Math.abs(nCx - oCx) < SNAP_THRESHOLD) snapX = oCx - w/2;
+    if (snapX === null && Math.abs(nx - ox) < SNAP_THRESHOLD) snapX = ox;
+    if (snapX === null && Math.abs(nRight - (ox + ow)) < SNAP_THRESHOLD) snapX = ox + ow - w;
+    if (snapX === null && Math.abs(nx - (ox + ow)) < SNAP_THRESHOLD) snapX = ox + ow;
+    if (snapX === null && Math.abs(nRight - ox) < SNAP_THRESHOLD) snapX = ox - w;
+
+    if (snapY === null && Math.abs(nCy - oCy) < SNAP_THRESHOLD) snapY = oCy - h/2;
+    if (snapY === null && Math.abs(ny - oy) < SNAP_THRESHOLD) snapY = oy;
+    if (snapY === null && Math.abs(nBottom - (oy + oh)) < SNAP_THRESHOLD) snapY = oy + oh - h;
+    if (snapY === null && Math.abs(ny - (oy + oh)) < SNAP_THRESHOLD) snapY = oy + oh;
+    if (snapY === null && Math.abs(nBottom - oy) < SNAP_THRESHOLD) snapY = oy - h;
+  });
+
+  const finalX = snapX !== null ? snapX : Math.round(nx / GRID_SIZE) * GRID_SIZE;
+  const finalY = snapY !== null ? snapY : Math.round(ny / GRID_SIZE) * GRID_SIZE;
+
+  if (finalX !== nx || finalY !== ny) {
+    el.style.left = finalX + 'px';
+    el.style.top = finalY + 'px';
+    node.pos_x = finalX;
+    node.pos_y = finalY;
+    editor.updateConnectionNodes('node-'+dfId);
   }
+
+  updateGuideLines(snapX, snapY, finalX, finalY, w, h);
+});
+
+document.addEventListener('mouseup', () => {
+  const svg = document.getElementById('guide-lines');
+  if (svg) svg.innerHTML = '';
 });
 
 // ── PRESETS SIDEBAR ────────────────────────
@@ -697,7 +772,7 @@ async function loadPipeline(name) {
       };
 
       const inputs = n.type === 'task' ? 0 : 1;
-      const outputs = n.type === 'report' ? 0 : 1;
+      const outputs = preset?.type === 'report' || n?.type === 'report' ? 0 : 1;
       const px = n.pos ? n.pos.x : 200 + Math.random()*400;
       const py = n.pos ? n.pos.y : 100 + Math.random()*300;
 
@@ -739,6 +814,30 @@ async function runPipeline() {
     const data = await res.json();
     currentRunId = data.run_id;
     document.getElementById('run-status').textContent = 'running: ' + currentRunId;
+    document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
+    document.getElementById('btn-run').className = 'btn-stop';
+    document.getElementById('btn-run').onclick = stopRun;
+    startPolling();
+  } catch(err) {
+    document.getElementById('run-status').textContent = 'error: ' + err.message;
+  }
+}
+
+async function runFromNode(nodeId, event) {
+  event.stopPropagation();
+  const config = buildPipelineJSON();
+  config.start_from = nodeId;
+  if (!config.nodes.length) return;
+
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    currentRunId = data.run_id;
+    document.getElementById('run-status').textContent = 'running from ' + nodeId + ': ' + currentRunId;
     document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
     document.getElementById('btn-run').className = 'btn-stop';
     document.getElementById('btn-run').onclick = stopRun;
@@ -802,6 +901,7 @@ async function pollStatus() {
 // ── LOG VIEWER ─────────────────────────────
 function toggleLogs() {
   document.getElementById('log-viewer').classList.toggle('hidden');
+  document.getElementById('rh-logs').classList.toggle('hidden');
   if (!document.getElementById('log-viewer').classList.contains('hidden') && selectedNodeId) {
     loadNodeLog(selectedNodeId);
   }
@@ -863,7 +963,7 @@ function importJSON() {
           projectAlias: proj ? proj.alias : '',
         };
         const inputs = n.type === 'task' ? 0 : 1;
-        const outputs = n.type === 'report' ? 0 : 1;
+        const outputs = preset?.type === 'report' || n?.type === 'report' ? 0 : 1;
         const px = n.pos ? n.pos.x : 200 + Math.random()*400;
         const py = n.pos ? n.pos.y : 100 + Math.random()*300;
         const dfId = editor.addNode(n.id, inputs, outputs, px, py, '', data, nodeHTML(data));
@@ -954,6 +1054,7 @@ document.addEventListener('keydown', e => {
       document.getElementById('config-panel').classList.add('hidden');
     }
     document.getElementById('log-viewer').classList.add('hidden');
+    document.getElementById('rh-logs').classList.add('hidden');
     document.getElementById('project-modal').classList.add('hidden');
   }
 
@@ -970,6 +1071,40 @@ document.addEventListener('keydown', e => {
     else runPipeline();
   }
 });
+
+// ── RESIZE HANDLES ──────────────────────────
+function initResize(handleId, target, dimension, min, max, direction) {
+  const handle = document.getElementById(handleId);
+  if (!handle) return;
+  let startPos, startSize;
+
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault();
+    startPos = direction === 'h' ? e.clientX : e.clientY;
+    startSize = target.getBoundingClientRect()[dimension];
+    handle.classList.add('active');
+
+    function onMove(e) {
+      const delta = (direction === 'h' ? e.clientX : e.clientY) - startPos;
+      const sign = (handleId === 'rh-config' || handleId === 'rh-logs') ? -1 : 1;
+      const newSize = Math.min(max, Math.max(min, startSize + delta * sign));
+      target.style[dimension] = newSize + 'px';
+    }
+
+    function onUp() {
+      handle.classList.remove('active');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+initResize('rh-sidebar', document.getElementById('sidebar'), 'width', 120, 400, 'h');
+initResize('rh-config', document.getElementById('config-panel'), 'width', 200, 600, 'h');
+initResize('rh-logs', document.getElementById('log-viewer'), 'height', 80, 500, 'v');
 
 // ── INIT ───────────────────────────────────
 loadProjectsFromServer();
