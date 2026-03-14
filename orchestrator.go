@@ -21,6 +21,7 @@ type Orchestrator struct {
 	projects  map[string]Project
 	nodesMap  map[string]NodeConfig
 	statuses  map[string]NodeStatus
+	answerChs map[string]chan []Question
 	mu        sync.Mutex
 	headless  bool
 }
@@ -45,6 +46,7 @@ func NewOrchestrator(config PipelineConfig, runID string) *Orchestrator {
 		projects:  pm,
 		nodesMap:  nm,
 		statuses:  make(map[string]NodeStatus),
+		answerChs: make(map[string]chan []Question),
 	}
 }
 
@@ -120,23 +122,105 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 		model = o.config.Settings.Model
 	}
 
-	result, err := runAgent(ctx, prompt, node.Config.AllowedTools,
-		workdir, model, o.config.Settings.TimeoutSeconds)
-
-	if err != nil {
-		o.setStatus(nodeID, "error", err.Error())
-		os.WriteFile(filepath.Join(o.logsDir, nodeID+".error.log"),
-			[]byte(err.Error()), 0644)
-		return
+	maxRounds := node.Config.MaxQuestionRounds
+	if maxRounds <= 0 {
+		maxRounds = 3
 	}
 
-	os.WriteFile(filepath.Join(o.logsDir, nodeID+".log"), []byte(result), 0644)
+	// Create answer channel for interactive nodes
+	if node.Config.Interactive {
+		o.mu.Lock()
+		o.answerChs[nodeID] = make(chan []Question, 1)
+		o.mu.Unlock()
+	}
+
+	currentPrompt := prompt
+	for round := 0; round <= maxRounds; round++ {
+		result, err := runAgent(ctx, currentPrompt, node.Config.AllowedTools,
+			workdir, model, o.config.Settings.TimeoutSeconds)
+
+		if err != nil {
+			o.setStatus(nodeID, "error", err.Error())
+			os.WriteFile(filepath.Join(o.logsDir, nodeID+".error.log"),
+				[]byte(err.Error()), 0644)
+			return
+		}
+
+		os.WriteFile(filepath.Join(o.logsDir, nodeID+".log"), []byte(result), 0644)
+
+		// Check for interactive questions
+		if !node.Config.Interactive {
+			break
+		}
+
+		questions := parseQuestions(result)
+		if questions == nil {
+			break
+		}
+
+		if round == maxRounds {
+			// Max rounds reached, finish anyway
+			break
+		}
+
+		// Set waiting_for_input status with questions
+		o.mu.Lock()
+		ns := o.statuses[nodeID]
+		ns.Status = "waiting_for_input"
+		ns.Message = fmt.Sprintf("Has %d question(s) (round %d/%d)", len(questions), round+1, maxRounds)
+		ns.Questions = questions
+		ns.QuestionRound = round + 1
+		o.statuses[nodeID] = ns
+		data, _ := json.MarshalIndent(o.statuses, "", "  ")
+		os.WriteFile(filepath.Join(o.runDir, "status.json"), data, 0644)
+		ch := o.answerChs[nodeID]
+		o.mu.Unlock()
+
+		if o.headless {
+			label := node.Label
+			if label == "" {
+				label = nodeID
+			}
+			fmt.Printf("[%s] %s waiting for answers (round %d/%d, %d questions)\n",
+				time.Now().Format("15:04:05"), label, round+1, maxRounds, len(questions))
+		}
+
+		// Block until answers arrive or context is cancelled
+		select {
+		case answered := <-ch:
+			// Build augmented prompt with answers
+			currentPrompt = prompt +
+				"\n\n## Previous output\n" + result +
+				"\n\n## Answers to your questions\n" + formatAnswers(answered) +
+				"\n\nNow continue with your task using these answers. Do not ask the same questions again."
+			o.setStatus(nodeID, "running", fmt.Sprintf("Continuing with answers (round %d/%d)", round+1, maxRounds))
+		case <-ctx.Done():
+			o.setStatus(nodeID, "error", "Cancelled while waiting for answers")
+			return
+		}
+	}
 
 	for _, art := range node.Config.OutputArtifacts {
 		deliverFile(workdir, art.File, art.DeliverTo, o.projects, o.sharedDir)
 	}
 
 	o.setStatus(nodeID, "done", "Complete")
+}
+
+// SubmitAnswer delivers user answers to a waiting interactive node.
+func (o *Orchestrator) SubmitAnswer(nodeID string, answers []Question) bool {
+	o.mu.Lock()
+	ch, ok := o.answerChs[nodeID]
+	o.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- answers:
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *Orchestrator) reviewLoop(ctx context.Context, reviewer NodeConfig) {

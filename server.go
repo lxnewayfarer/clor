@@ -45,6 +45,7 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/run/{id}/status", handleRunStatus)
 	mux.HandleFunc("POST /api/run/{id}/stop", handleStopRun)
 	mux.HandleFunc("GET /api/run/{id}/logs/{nodeId}", handleNodeLog)
+	mux.HandleFunc("POST /api/run/{id}/answer/{nodeId}", handleSubmitAnswer)
 
 	return mux
 }
@@ -165,6 +166,7 @@ var activeRuns = make(map[string]*RunHandle)
 
 type RunHandle struct {
 	Cancel func()
+	Orch   *Orchestrator
 }
 
 func handleStartRun(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +178,7 @@ func handleStartRun(w http.ResponseWriter, r *http.Request) {
 	runID := generateID()
 	orch := NewOrchestrator(config, runID)
 	ctx, cancel := contextWithCancel()
-	activeRuns[runID] = &RunHandle{Cancel: cancel}
+	activeRuns[runID] = &RunHandle{Cancel: cancel, Orch: orch}
 	go func() {
 		orch.Run(ctx)
 		delete(activeRuns, runID)
@@ -232,4 +234,31 @@ func handleNodeLog(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"log": string(logContent)})
+}
+
+func handleSubmitAnswer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	nodeId := r.PathValue("nodeId")
+
+	rh, ok := activeRuns[id]
+	if !ok {
+		http.Error(w, "run not found", 404)
+		return
+	}
+
+	var body struct {
+		Answers []Question `json:"answers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", 400)
+		return
+	}
+
+	if !rh.Orch.SubmitAnswer(nodeId, body.Answers) {
+		http.Error(w, "node not waiting for input", 409)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }

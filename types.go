@@ -40,14 +40,16 @@ type NodeConfig struct {
 }
 
 type NodeDetail struct {
-	Description     string           `json:"description,omitempty"`
-	ProjectID       string           `json:"project_id,omitempty"`
-	ProjectIDs      []string         `json:"project_ids,omitempty"`
-	Prompt          string           `json:"prompt,omitempty"`
-	AllowedTools    []string         `json:"allowed_tools,omitempty"`
-	ModelOverride   string           `json:"model_override,omitempty"`
-	OutputArtifacts []OutputArtifact `json:"output_artifacts,omitempty"`
-	ReviewMode      *ReviewMode      `json:"review_mode,omitempty"`
+	Description       string           `json:"description,omitempty"`
+	ProjectID         string           `json:"project_id,omitempty"`
+	ProjectIDs        []string         `json:"project_ids,omitempty"`
+	Prompt            string           `json:"prompt,omitempty"`
+	AllowedTools      []string         `json:"allowed_tools,omitempty"`
+	ModelOverride     string           `json:"model_override,omitempty"`
+	OutputArtifacts   []OutputArtifact `json:"output_artifacts,omitempty"`
+	ReviewMode        *ReviewMode      `json:"review_mode,omitempty"`
+	Interactive       bool             `json:"interactive,omitempty"`
+	MaxQuestionRounds int              `json:"max_question_rounds,omitempty"`
 }
 
 type OutputArtifact struct {
@@ -67,11 +69,21 @@ type Edge struct {
 	Target string `json:"target"`
 }
 
+// ── Questions (interactive nodes) ───────────
+
+type Question struct {
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Answer string `json:"answer,omitempty"`
+}
+
 // ── Run status ──────────────────────────────
 
 type NodeStatus struct {
-	Status    string  `json:"status"`
-	Message   string  `json:"message"`
-	StartedAt float64 `json:"started_at,omitempty"`
-	Elapsed   int     `json:"elapsed"`
+	Status        string     `json:"status"`
+	Message       string     `json:"message"`
+	StartedAt     float64    `json:"started_at,omitempty"`
+	Elapsed       int        `json:"elapsed"`
+	Questions     []Question `json:"questions,omitempty"`
+	QuestionRound int        `json:"question_round,omitempty"`
 }

@@ -94,7 +94,16 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .node-play-btn{position:absolute;top:4px;right:22px;background:none;border:none;color:var(--green);font-size:11px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
 .node-play-btn:hover{background:var(--green)18;border-radius:3px}
 .drawflow-node:hover .node-delete-btn,.drawflow-node:hover .node-play-btn{opacity:1}
-.s-running{color:var(--amber)}.s-done{color:var(--green)}.s-error{color:var(--red)}.s-queued{color:var(--text3)}
+.s-running{color:var(--amber)}.s-done{color:var(--green)}.s-error{color:var(--red)}.s-queued{color:var(--text3)}.s-waiting_for_input{color:var(--purple)}
+@keyframes pulse-purple{0%,100%{border-color:var(--border)}50%{border-color:var(--purple)}}
+.node-waiting{animation:pulse-purple 2s ease-in-out infinite}
+
+.question-form{padding:8px 0}
+.question-form .q-item{margin-bottom:8px}
+.question-form .q-item label{color:var(--text);font-size:12px;margin-bottom:2px}
+.question-form .q-item input{font-size:12px;padding:4px 6px}
+.question-form button{margin-top:6px;background:var(--purple)22;color:var(--purple);border-color:var(--purple)44}
+.question-form button:hover{background:var(--purple)33}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:999}
 .modal-overlay.hidden{display:none}
@@ -180,7 +189,6 @@ const PRESETS = [
   {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.',reviewMode:true},
   {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],prompt:'Summarize what was built for {task}. Read all changed files and produce a final report.'},
   {type:'task',icon:'\u{1F4CC}',label:'Task'},
-  {type:'report',icon:'\u{1F3C1}',label:'Report'},
 ];
 const ALL_TOOLS = ['Read','Write','Edit','Bash','Glob','Grep'];
 
@@ -224,7 +232,7 @@ function addNode(preset, posX, posY) {
   if (preset.description) data.description = preset.description;
 
   const inputs = preset.type === 'task' ? 0 : 1;
-  const outputs = preset?.type === 'report' || n?.type === 'report' ? 0 : 1;
+  const outputs = 1;
 
   editor.addNode(id, inputs, outputs, posX, posY, '', data, nodeHTML(data));
   return id;
@@ -461,6 +469,14 @@ function showConfigPanel(dfId) {
     html += '<label>Output artifacts <button id="cf-add-artifact" style="font-size:10px;padding:1px 5px">+</button></label>';
     html += '<div id="cf-artifacts"></div>';
 
+    // Interactive mode
+    const intEnabled = d.interactive ? true : false;
+    html += '<label><input type="checkbox" id="cf-interactive" style="width:auto;margin-right:4px"'+(intEnabled?' checked':'')+'/> Interactive (ask questions)</label>';
+    html += '<div id="cf-interactive-config" style="margin-top:4px;'+(intEnabled?'':'display:none')+'">';
+    html += '<label>Max question rounds</label><input type="number" id="cf-max-q-rounds" value="'+(d.maxQuestionRounds||3)+'" min="1" max="10" style="width:80px" />';
+    html += '</div>';
+    html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
+
     // Review mode
     const rmEnabled = d.reviewMode ? true : false;
     html += '<label><input type="checkbox" id="cf-review-enabled" style="width:auto;margin-right:4px"'+(rmEnabled?' checked':'')+'/> Review mode</label>';
@@ -588,6 +604,21 @@ function showConfigPanel(dfId) {
     });
   }
 
+  const interactiveCheck = document.getElementById('cf-interactive');
+  if (interactiveCheck) {
+    interactiveCheck.addEventListener('change', () => {
+      info.data.interactive = interactiveCheck.checked;
+      const cfg = document.getElementById('cf-interactive-config');
+      if (cfg) cfg.style.display = interactiveCheck.checked ? '' : 'none';
+    });
+  }
+  const maxQRounds = document.getElementById('cf-max-q-rounds');
+  if (maxQRounds) {
+    maxQRounds.addEventListener('input', () => {
+      info.data.maxQuestionRounds = parseInt(maxQRounds.value) || 3;
+    });
+  }
+
   const reviewCheck = document.getElementById('cf-review-enabled');
   if (reviewCheck) {
     reviewCheck.addEventListener('change', () => {
@@ -681,6 +712,8 @@ function buildPipelineJSON() {
         allowed_tools: d.tools || [],
         model_override: d.modelOverride || '',
         output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
+        interactive: d.interactive || false,
+        max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
         review_mode: d.reviewMode ? {enabled:true, pass_pattern:'(?i)review\\s*status:\\s*pass', fail_pattern:'(?i)review\\s*status:\\s*fail', fix_targets: d.reviewFixTargets || {}} : null,
       }
     });
@@ -755,7 +788,7 @@ async function loadPipeline(name) {
       const proj = projects.find(p => p.id === (pIds[0] || ''));
       const data = {
         type: n.type,
-        icon: n.type==='task'?'\u{1F4CC}':n.type==='report'?'\u{1F3C1}':'\u{1F4BB}',
+        icon: n.type==='task'?'\u{1F4CC}':'\u{1F4BB}',
         label: n.label,
         tools: n.config.allowed_tools || [],
         prompt: n.config.prompt || '',
@@ -764,6 +797,8 @@ async function loadPipeline(name) {
         reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
         reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
         outputArtifacts: n.config.output_artifacts || [],
+        interactive: n.config.interactive || false,
+        maxQuestionRounds: n.config.max_question_rounds || 3,
         projectId: pIds[0] || '',
         projectIds: pIds,
         nodeId: n.id,
@@ -772,7 +807,7 @@ async function loadPipeline(name) {
       };
 
       const inputs = n.type === 'task' ? 0 : 1;
-      const outputs = preset?.type === 'report' || n?.type === 'report' ? 0 : 1;
+      const outputs = 1;
       const px = n.pos ? n.pos.x : 200 + Math.random()*400;
       const py = n.pos ? n.pos.y : 100 + Math.random()*300;
 
@@ -873,6 +908,7 @@ async function pollStatus() {
     const res = await fetch('/api/run/'+currentRunId+'/status');
     const statuses = await res.json();
     let allDone = true;
+    let waitingNode = null;
 
     Object.keys(statuses).forEach(nodeId => {
       const s = statuses[nodeId];
@@ -885,8 +921,27 @@ async function pollStatus() {
         el.className = 'node-status ' + cls;
         el.textContent = text;
       }
+
+      // Pulse effect for waiting nodes
+      const dfId = getDfIdByNodeId(nodeId);
+      if (dfId) {
+        const nodeEl = canvasEl.querySelector('#node-'+dfId);
+        if (nodeEl) {
+          if (s.status === 'waiting_for_input') nodeEl.classList.add('node-waiting');
+          else nodeEl.classList.remove('node-waiting');
+        }
+      }
+
+      if (s.status === 'waiting_for_input' && s.questions && s.questions.length > 0) {
+        waitingNode = {nodeId, questions: s.questions, round: s.question_round};
+      }
       if (s.status !== 'done' && s.status !== 'error' && s.status !== 'idle') allDone = false;
     });
+
+    // Show question form in log panel if a node is waiting
+    if (waitingNode) {
+      showQuestionForm(waitingNode.nodeId, waitingNode.questions, waitingNode.round);
+    }
 
     if (allDone && Object.keys(statuses).length > 0) {
       stopPolling();
@@ -896,6 +951,60 @@ async function pollStatus() {
       document.getElementById('run-status').textContent = 'done';
     }
   } catch(_) {}
+}
+
+function getDfIdByNodeId(nodeId) {
+  const exp = editor.export();
+  const mod = exp.drawflow.Home.data;
+  for (const dfId of Object.keys(mod)) {
+    if (mod[dfId].data && mod[dfId].data.nodeId === nodeId) return dfId;
+  }
+  return null;
+}
+
+let activeQuestionNodeId = null;
+
+function showQuestionForm(nodeId, questions, round) {
+  // Don't re-render if already showing for same node+round
+  if (activeQuestionNodeId === nodeId + '_' + round) return;
+  activeQuestionNodeId = nodeId + '_' + round;
+
+  const logViewer = document.getElementById('log-viewer');
+  logViewer.classList.remove('hidden');
+  document.getElementById('rh-logs').classList.remove('hidden');
+
+  let html = '<div class="question-form">';
+  html += '<div style="color:var(--purple);font-weight:500;margin-bottom:6px">';
+  html += '\u2753 ' + esc(nodeId) + ' has questions (round ' + round + '):</div>';
+  questions.forEach((q, i) => {
+    html += '<div class="q-item">';
+    html += '<label>' + (i+1) + '. ' + esc(q.text) + '</label>';
+    html += '<input type="text" id="qa-'+q.id+'" placeholder="Your answer..." />';
+    html += '</div>';
+  });
+  html += '<button onclick="submitAnswers(\''+esc(nodeId)+'\','+JSON.stringify(questions).replace(/'/g,"\\'")+')">Submit Answers</button>';
+  html += '</div>';
+  logViewer.innerHTML = html;
+}
+
+async function submitAnswers(nodeId, questions) {
+  const answers = questions.map(q => ({
+    id: q.id,
+    text: q.text,
+    answer: (document.getElementById('qa-'+q.id) || {}).value || ''
+  }));
+
+  try {
+    await fetch('/api/run/'+currentRunId+'/answer/'+encodeURIComponent(nodeId), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({answers})
+    });
+    activeQuestionNodeId = null;
+    document.getElementById('log-viewer').textContent = 'Answers submitted, agent continuing...';
+  } catch(err) {
+    document.getElementById('log-viewer').textContent = 'Error submitting answers: ' + err.message;
+  }
 }
 
 // ── LOG VIEWER ─────────────────────────────
@@ -947,7 +1056,7 @@ function importJSON() {
         const proj = projects.find(p => p.id === (pIds[0] || ''));
         const data = {
           type: n.type,
-          icon: n.type==='task'?'\u{1F4CC}':n.type==='report'?'\u{1F3C1}':'\u{1F4BB}',
+          icon: n.type==='task'?'\u{1F4CC}':'\u{1F4BB}',
           label: n.label,
           tools: n.config.allowed_tools || [],
           prompt: n.config.prompt || '',
@@ -956,6 +1065,8 @@ function importJSON() {
           reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
           reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
           outputArtifacts: n.config.output_artifacts || [],
+          interactive: n.config.interactive || false,
+          maxQuestionRounds: n.config.max_question_rounds || 3,
           projectId: pIds[0] || '',
           projectIds: pIds,
           nodeId: n.id,
@@ -963,7 +1074,7 @@ function importJSON() {
           projectAlias: proj ? proj.alias : '',
         };
         const inputs = n.type === 'task' ? 0 : 1;
-        const outputs = preset?.type === 'report' || n?.type === 'report' ? 0 : 1;
+        const outputs = 1;
         const px = n.pos ? n.pos.x : 200 + Math.random()*400;
         const py = n.pos ? n.pos.y : 100 + Math.random()*300;
         const dfId = editor.addNode(n.id, inputs, outputs, px, py, '', data, nodeHTML(data));
@@ -1041,7 +1152,7 @@ document.addEventListener('keydown', e => {
       nodeCounter++;
       d.nodeId = d.type + '_' + nodeCounter;
       const inputs = d.type === 'task' ? 0 : 1;
-      const outputs = d.type === 'report' ? 0 : 1;
+      const outputs = 1;
       editor.addNode(d.nodeId, inputs, outputs, info.pos_x + 30, info.pos_y + 30, '', d, nodeHTML(d));
     }
   }
