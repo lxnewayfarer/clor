@@ -97,6 +97,12 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .subtask-fill{height:100%;background:var(--amber);border-radius:2px;transition:width 0.3s ease;width:0}
 .subtask-fill.done{background:var(--green)}
 .subtask-text{font-size:10px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.subtask-list{margin-top:5px;display:flex;flex-direction:column;gap:2px;max-height:90px;overflow-y:auto}
+.subtask-entry{display:flex;align-items:baseline;gap:4px;font-size:10px;line-height:1.4}
+.subtask-entry .st-icon{flex-shrink:0;width:10px;text-align:center}
+.subtask-entry.st-done{color:var(--green)}
+.subtask-entry.st-active{color:var(--amber);font-weight:500}
+.subtask-entry.st-pending{color:var(--text3)}
 .node-delete-btn{position:absolute;top:4px;right:4px;background:none;border:none;color:var(--text3);font-size:14px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
 .node-delete-btn:hover{color:var(--red);background:none;border:none}
 .node-play-btn{position:absolute;top:4px;right:22px;background:none;border:none;color:var(--green);font-size:11px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
@@ -220,6 +226,7 @@ let projects = [];
 let nodeCounter = 0;
 let selectedNodeId = null;
 let currentRunId = null;
+let subtaskHistory = {}; // nodeId -> [{index, label}] seen labels per run
 let pollTimer = null;
 let eventSource = null;
 let pipelineVariables = [];
@@ -259,7 +266,7 @@ function nodeHTML(data) {
     : (pa ? '<span class="node-project-pill" style="background:'+pc+'18;color:'+pc+'">'+pa+'</span>' : '<span class="node-no-project-warn">no project</span>');
   const tools = (data.tools||[]).map(t => '<span class="tool-pill">'+t+'</span>').join('');
   const status = '<div class="node-status" id="ns-'+data.nodeId+'"></div>';
-  const subtaskProgress = '<div class="subtask-progress" id="sp-'+data.nodeId+'" style="display:none"><div class="subtask-bar"><div class="subtask-fill" id="sf-'+data.nodeId+'"></div></div><div class="subtask-text" id="st-'+data.nodeId+'"></div></div>';
+  const subtaskProgress = '<div class="subtask-progress" id="sp-'+data.nodeId+'" style="display:none"><div class="subtask-bar"><div class="subtask-fill" id="sf-'+data.nodeId+'"></div></div><div class="subtask-list" id="sl-'+data.nodeId+'"></div></div>';
   const delBtn = '<button class="node-delete-btn" onclick="deleteNodeBtn(\''+data.nodeId+'\',event)" title="Delete node">&times;</button>';
   const playBtn = data.type !== 'task' ? '<button class="node-play-btn" onclick="runFromNode(\''+data.nodeId+'\',event)" title="Run from here">&#9654;</button>' : '';
 
@@ -1004,6 +1011,7 @@ async function doRunPipeline(config) {
     });
     const data = await res.json();
     currentRunId = data.run_id;
+    subtaskHistory = {};
     document.getElementById('run-status').textContent = 'running: ' + currentRunId;
     document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
     document.getElementById('btn-run').className = 'btn-stop';
@@ -1028,6 +1036,7 @@ async function runFromNode(nodeId, event) {
     });
     const data = await res.json();
     currentRunId = data.run_id;
+    subtaskHistory = {};
     document.getElementById('run-status').textContent = 'running from ' + nodeId + ': ' + currentRunId;
     document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
     document.getElementById('btn-run').className = 'btn-stop';
@@ -1096,7 +1105,7 @@ function applyStatuses(statuses) {
       }
     }
 
-    // Subtask progress bar
+    // Subtask progress bar + mini-list
     const sp = document.getElementById('sp-'+nodeId);
     if (sp) {
       if (s.subtask_total > 0) {
@@ -1108,10 +1117,38 @@ function applyStatuses(statuses) {
           if (s.status === 'done') fill.classList.add('done');
           else fill.classList.remove('done');
         }
-        const txt = document.getElementById('st-'+nodeId);
-        if (txt) {
-          txt.textContent = s.subtask_index + '/' + s.subtask_total +
-            (s.subtask_label ? ' \u2014 ' + s.subtask_label : '');
+        // Track history of seen subtask labels
+        if (!subtaskHistory[nodeId]) subtaskHistory[nodeId] = [];
+        const hist = subtaskHistory[nodeId];
+        const activeIdx = s.subtask_index; // 1-based current
+        // Record label for completed subtask (index just passed)
+        if (s.subtask_label && !hist.find(h => h.index === activeIdx)) {
+          hist.push({index: activeIdx, label: s.subtask_label});
+        }
+        // Build mini-list: show up to 5 entries centered around active
+        const sl = document.getElementById('sl-'+nodeId);
+        if (sl) {
+          const total = s.subtask_total;
+          const MAX = 5;
+          // Determine window of indices to show
+          let start = Math.max(1, activeIdx - 2);
+          let end = Math.min(total, start + MAX - 1);
+          if (end - start < MAX - 1) start = Math.max(1, end - MAX + 1);
+          let html = '';
+          for (let i = start; i <= end; i++) {
+            const rec = hist.find(h => h.index === i);
+            const label = rec ? rec.label : (i === activeIdx && s.subtask_label ? s.subtask_label : '#' + i);
+            let cls, icon;
+            if (s.status === 'done' || i < activeIdx) {
+              cls = 'st-done'; icon = '\u2713';
+            } else if (i === activeIdx) {
+              cls = 'st-active'; icon = '\u25CF';
+            } else {
+              cls = 'st-pending'; icon = '\u25CB';
+            }
+            html += '<div class="subtask-entry '+cls+'"><span class="st-icon">'+icon+'</span><span>'+esc(label)+'</span></div>';
+          }
+          sl.innerHTML = html;
         }
       } else {
         sp.style.display = 'none';

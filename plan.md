@@ -1,38 +1,51 @@
-# Plan: Fix leftover files in project directories
+# Canvas UX Improvement Plan
 
-## Problem
+## Context & Goals
 
-After a pipeline run, two files may remain in the user's project directory:
+The current canvas has three pain points:
+1. **Port rigidity** — inputs always on left, outputs always on right. When nodes are arranged vertically or in complex topologies, connection lines look messy.
+2. **Layout alignment** — `autoLayout()` aligns nodes to the top of each wave-column. Nodes of different heights cause diagonal/uneven connection lines. Parallel connections are not considered.
+3. **Subtask visibility** — the subtask progress bar (amber fill + `index/total` text) exists but is minimal; there's no clear per-subtask breakdown visible in the node body during a run.
 
-1. **`plan.md`** — created by the Architect agent (its prompt instructs it to write there). Nodes have a `TempFiles` field for cleanup, but the Architect preset doesn't populate it by default, so the file is never cleaned up.
+---
 
-2. **`.clor-last-output`** — written by `agent.go:122` unconditionally to `workdir+"/.clor-last-output"` after every successful agent run. This is a debug artifact with no cleanup logic at all.
+## Architectural Decisions & Constraints
 
-## Root causes
+- **No new dependencies.** Drawflow is the only canvas library; all improvements must work within its model.
+- **Drawflow port model.** Drawflow hard-codes input ports on the left and output ports on the right of a node. True floating/dynamic ports require either patching Drawflow's CSS/JS or replacing it. We will use **CSS transforms + absolute positioning tricks** to simulate centered ports rather than replacing Drawflow entirely.
+- **Layout algorithm** lives entirely in `autoLayout()` in `web/index.html`. No Go-side changes needed for layout.
+- **Subtask data** is already emitted by the backend in status events (`subtask_index`, `subtask_total`, `subtask_label`). The frontend just needs richer rendering.
+- All changes are confined to `web/index.html`.
 
-### `.clor-last-output`
-In `agent.go` line 122:
-```go
-os.WriteFile(workdir+"/.clor-last-output", stdout.Bytes(), 0644)
+---
+
+## Shared Technical Approach
+
+### 1. Flexible Port Positioning (CSS-only)
+
+Drawflow renders `.input` and `.output` dots as absolutely-positioned children of `.drawflow-node` using Drawflow's internal layout. To make them appear vertically centered on the node (regardless of height), we override:
+
+```css
+.drawflow .drawflow-node .input  { top: 50% !important; transform: translateY(-50%); }
+.drawflow .drawflow-node .output { top: 50% !important; transform: translateY(-50%); }
 ```
-This writes the full agent stdout to the project directory on every run. It was likely added for debugging. The output is already captured in the proper log file under `~/.config/clor/runs/{runID}/logs/{nodeID}.log`. The `.clor-last-output` file is redundant and has no cleanup.
 
-### `plan.md`
-The Architect agent prompt says "Write the full plan to plan.md". The `TempFiles` mechanism exists in `orchestrator.go` (`cleanupTempFiles()`) but the Architect node preset in `web/index.html` doesn't set `temp_files: ["plan.md"]` by default, so the file is never removed.
+This makes all connection lines land at the vertical midpoint of each node, eliminating the "crooked lines on different-height nodes" problem without touching Drawflow internals.
 
-## Solution
+### 2. Improved Layout: Center-align nodes within each wave column
 
-### Fix 1: Remove `.clor-last-output` entirely
-The output is already stored in the proper run log (`logsDir/nodeID.log`). There is no need to also write it to the project workdir. Delete this line from `agent.go`.
+Replace top-alignment with vertical centering. The total column height = `n * NODE_HEIGHT + (n-1) * NODE_GAP`. Center that block around a shared `midY`.
 
-### Fix 2: Add `plan.md` to Architect preset's TempFiles
-In `web/index.html`, the Architect node preset should include `temp_files: ["plan.md"]` so the orchestrator's existing `cleanupTempFiles()` mechanism removes it after the run completes.
+Also account for parallel edges: when two nodes in the same wave both connect to the same target, offset them vertically so lines don't overlap.
 
-## Architectural constraints
-- No new abstractions needed — the `TempFiles` cleanup mechanism already exists and works.
-- The run logs (`~/.config/clor/runs/`) are already the canonical store for agent output. Removing `.clor-last-output` does not lose any information.
-- `cleanupTempFiles()` is called at the end of every run in `orchestrator.go:105`, so Fix 2 requires only a data change in the preset definition.
+### 3. Subtask Breakdown in Node Body
+
+During a run, expand the subtask section inside the node to show a numbered list of completed/active/pending subtasks (up to a cap, e.g. 5 visible), similar to a mini checklist. Each subtask line gets a status icon (✓ done, ● active, ○ pending).
+
+---
 
 ## Subtasks
-1. Remove the `.clor-last-output` write from `agent.go:122` (the `os.WriteFile` call and its surrounding `if logStream != nil` block, keeping the return statement)
-2. Add `temp_files: ["plan.md"]` to the Architect node preset definition in `web/index.html`
+
+1. Override Drawflow port CSS so input and output dots are always vertically centered on each node, fixing crooked connection lines when nodes have different heights.
+2. Rewrite `autoLayout()` to center-align nodes vertically within each wave column (instead of top-aligning), using measured or estimated node heights, so connection lines stay horizontal between same-wave peers.
+3. Improve subtask display inside the node body: render a scrollable mini-list of up to 5 subtask entries with done/active/pending icons, replacing the single-line text, so the user can see which subtasks have completed during a run.
