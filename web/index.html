@@ -903,6 +903,7 @@ async function loadPipeline(name) {
         outputArtifacts: n.config.output_artifacts || [],
         tempFiles: n.config.temp_files || [],
         interactive: n.config.interactive || false,
+        decompose: n.config.decompose || false,
         maxQuestionRounds: n.config.max_question_rounds || 3,
         maxRetries: n.config.max_retries || 0,
         retryDelaySeconds: n.config.retry_delay_seconds || 0,
