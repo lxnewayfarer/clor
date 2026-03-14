@@ -106,6 +106,14 @@ func expandVars(prompt string, variables []Variable, values map[string]string) s
 	})
 }
 
+// expandSubtask replaces {subtask}, {subtask_index}, {subtask_total} in a prompt.
+func expandSubtask(prompt, subtask string, index, total int) string {
+	prompt = strings.ReplaceAll(prompt, "{subtask}", subtask)
+	prompt = strings.ReplaceAll(prompt, "{subtask_index}", itoa(index))
+	prompt = strings.ReplaceAll(prompt, "{subtask_total}", itoa(total))
+	return prompt
+}
+
 func findByType(nodes []NodeConfig, nodeType string) *NodeConfig {
 	for _, n := range nodes {
 		if n.Type == nodeType {

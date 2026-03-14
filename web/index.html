@@ -92,6 +92,11 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .tool-pill{font-size:10px;padding:1px 5px;background:var(--bg4);border-radius:3px;color:var(--text2)}
 .node-desc{font-size:12px;color:var(--text2);margin-top:2px;max-height:36px;overflow:hidden}
 .node-status{font-size:11px;margin-top:4px}
+.subtask-progress{margin-top:4px}
+.subtask-bar{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.subtask-fill{height:100%;background:var(--amber);border-radius:2px;transition:width 0.3s ease;width:0}
+.subtask-fill.done{background:var(--green)}
+.subtask-text{font-size:10px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .node-delete-btn{position:absolute;top:4px;right:4px;background:none;border:none;color:var(--text3);font-size:14px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
 .node-delete-btn:hover{color:var(--red);background:none;border:none}
 .node-play-btn{position:absolute;top:4px;right:22px;background:none;border:none;color:var(--green);font-size:11px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
@@ -254,6 +259,7 @@ function nodeHTML(data) {
     : (pa ? '<span class="node-project-pill" style="background:'+pc+'18;color:'+pc+'">'+pa+'</span>' : '<span class="node-no-project-warn">no project</span>');
   const tools = (data.tools||[]).map(t => '<span class="tool-pill">'+t+'</span>').join('');
   const status = '<div class="node-status" id="ns-'+data.nodeId+'"></div>';
+  const subtaskProgress = '<div class="subtask-progress" id="sp-'+data.nodeId+'" style="display:none"><div class="subtask-bar"><div class="subtask-fill" id="sf-'+data.nodeId+'"></div></div><div class="subtask-text" id="st-'+data.nodeId+'"></div></div>';
   const delBtn = '<button class="node-delete-btn" onclick="deleteNodeBtn(\''+data.nodeId+'\',event)" title="Delete node">&times;</button>';
   const playBtn = data.type !== 'task' ? '<button class="node-play-btn" onclick="runFromNode(\''+data.nodeId+'\',event)" title="Run from here">&#9654;</button>' : '';
 
@@ -265,7 +271,7 @@ function nodeHTML(data) {
     '<div class="node-header"><span class="node-icon">'+(data.icon||'\u2699\uFE0F')+'</span>' +
     '<span class="node-label">'+(data.label||'Agent')+'</span></div>' +
     '<div class="node-tools">'+tools+'</div>' +
-    '<div class="node-projects">'+pills+'</div>'+status+'</div>';
+    '<div class="node-projects">'+pills+'</div>'+status+subtaskProgress+'</div>';
 }
 
 // ── ADD NODE ───────────────────────────────
@@ -548,6 +554,11 @@ function showConfigPanel(dfId) {
     html += '</div>';
     html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
 
+    // Decompose mode
+    const decEnabled = d.decompose ? true : false;
+    html += '<label><input type="checkbox" id="cf-decompose" style="width:auto;margin-right:4px"'+(decEnabled?' checked':'')+'/> Decompose subtasks</label>';
+    html += '<div class="hint">When enabled, reads upstream architect\'s "## Subtasks" and runs each as a separate claude session. Use {subtask} in prompt.</div>';
+
     // Reviewer config
     html += '<label>Reviewer for (target node)</label><select id="cf-reviewer-for">';
     html += '<option value="">— none (not a reviewer) —</option>';
@@ -708,6 +719,13 @@ function showConfigPanel(dfId) {
     });
   }
 
+  const decomposeCheck = document.getElementById('cf-decompose');
+  if (decomposeCheck) {
+    decomposeCheck.addEventListener('change', () => {
+      info.data.decompose = decomposeCheck.checked;
+    });
+  }
+
   const reviewerFor = document.getElementById('cf-reviewer-for');
   if (reviewerFor) {
     reviewerFor.addEventListener('change', () => {
@@ -801,6 +819,7 @@ function buildPipelineJSON() {
       output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
       temp_files: (d.tempFiles || []).filter(Boolean),
       interactive: d.interactive || false,
+      decompose: d.decompose || false,
       max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
       max_retries: d.maxRetries || 0,
       retry_delay_seconds: d.retryDelaySeconds || 0,
@@ -1094,6 +1113,28 @@ function applyStatuses(statuses) {
       el.innerHTML = esc(text);
       if (s.status === 'error' && currentRunId) {
         el.innerHTML += ' <button class="node-retry-btn" onclick="retryNode(\''+esc(nodeId)+'\')">Retry</button>';
+      }
+    }
+
+    // Subtask progress bar
+    const sp = document.getElementById('sp-'+nodeId);
+    if (sp) {
+      if (s.subtask_total > 0) {
+        sp.style.display = '';
+        const pct = Math.round((s.subtask_index / s.subtask_total) * 100);
+        const fill = document.getElementById('sf-'+nodeId);
+        if (fill) {
+          fill.style.width = pct + '%';
+          if (s.status === 'done') fill.classList.add('done');
+          else fill.classList.remove('done');
+        }
+        const txt = document.getElementById('st-'+nodeId);
+        if (txt) {
+          txt.textContent = s.subtask_index + '/' + s.subtask_total +
+            (s.subtask_label ? ' \u2014 ' + s.subtask_label : '');
+        }
+      } else {
+        sp.style.display = 'none';
       }
     }
 

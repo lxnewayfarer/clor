@@ -151,6 +151,12 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 		retryDelay = 5
 	}
 
+	// Decompose mode: run subtasks from upstream architect output
+	if node.Config.Decompose {
+		o.executeDecomposed(ctx, nodeID, node, prompt, workdir, model, logStream)
+		return
+	}
+
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -214,6 +220,111 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 	}
 
 	o.setStatus(nodeID, "done", "Complete")
+}
+
+// getUpstreamOutput reads the log of the first upstream node (by edges).
+func (o *Orchestrator) getUpstreamOutput(nodeID string) string {
+	for _, e := range o.config.Edges {
+		if e.Target == nodeID {
+			logPath := filepath.Join(o.logsDir, e.Source+".log")
+			data, err := os.ReadFile(logPath)
+			if err == nil {
+				return string(data)
+			}
+		}
+	}
+	return ""
+}
+
+// executeDecomposed reads the upstream architect's output, parses subtasks,
+// and runs a separate claude session for each subtask.
+func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, node NodeConfig, prompt, workdir, model string, logStream *LogStream) {
+	upstreamOutput := o.getUpstreamOutput(nodeID)
+	subtasks := ParseSubtasks(upstreamOutput)
+
+	if len(subtasks) == 0 {
+		// Fallback: no subtasks found, run as normal agent
+		maxRounds := node.Config.MaxQuestionRounds
+		if maxRounds <= 0 {
+			maxRounds = 3
+		}
+		success := o.runAgentWithInteractive(ctx, nodeID, node, prompt, workdir, model, maxRounds, logStream)
+		if success {
+			for _, art := range node.Config.OutputArtifacts {
+				deliverFile(workdir, art.File, art.DeliverTo, o.projects, o.sharedDir)
+			}
+			o.mu.Lock()
+			delete(o.logStreams, nodeID)
+			o.mu.Unlock()
+			o.setStatus(nodeID, "done", "Complete (no subtasks found)")
+		}
+		return
+	}
+
+	total := len(subtasks)
+	var cumulativeLog strings.Builder
+
+	for i, subtask := range subtasks {
+		if ctx.Err() != nil {
+			o.setStatus(nodeID, "error", "Cancelled")
+			return
+		}
+
+		idx := i + 1
+
+		// Update subtask progress in status
+		o.mu.Lock()
+		ns := o.statuses[nodeID]
+		ns.SubtaskIndex = idx
+		ns.SubtaskTotal = total
+		ns.SubtaskLabel = subtask
+		o.statuses[nodeID] = ns
+		o.mu.Unlock()
+		o.setStatus(nodeID, "running", fmt.Sprintf("Subtask %d/%d — %s", idx, total, subtask))
+
+		// Fresh log stream per subtask
+		subtaskLogStream := NewLogStream()
+		o.mu.Lock()
+		o.logStreams[nodeID] = subtaskLogStream
+		o.mu.Unlock()
+
+		// Expand subtask variables in the prompt
+		subtaskPrompt := expandSubtask(prompt, subtask, idx, total)
+
+		result, err := runAgent(ctx, subtaskPrompt, node.Config.AllowedTools,
+			workdir, model, o.config.Settings.TimeoutSeconds, subtaskLogStream)
+
+		if err != nil {
+			o.setStatus(nodeID, "error", fmt.Sprintf("Subtask %d/%d failed: %s", idx, total, err.Error()))
+			os.WriteFile(filepath.Join(o.logsDir, nodeID+".error.log"),
+				[]byte(err.Error()), 0644)
+			return
+		}
+
+		// Append to cumulative log
+		cumulativeLog.WriteString(fmt.Sprintf("\n\n=== Subtask %d/%d: %s ===\n\n", idx, total, subtask))
+		cumulativeLog.WriteString(result)
+
+		// Write cumulative log after each subtask
+		os.WriteFile(filepath.Join(o.logsDir, nodeID+".log"), []byte(cumulativeLog.String()), 0644)
+	}
+
+	// Deliver artifacts
+	for _, art := range node.Config.OutputArtifacts {
+		deliverFile(workdir, art.File, art.DeliverTo, o.projects, o.sharedDir)
+	}
+
+	// Clean up
+	o.mu.Lock()
+	delete(o.logStreams, nodeID)
+	ns := o.statuses[nodeID]
+	ns.SubtaskIndex = total
+	ns.SubtaskTotal = total
+	ns.SubtaskLabel = "All complete"
+	o.statuses[nodeID] = ns
+	o.mu.Unlock()
+
+	o.setStatus(nodeID, "done", fmt.Sprintf("Complete (%d subtasks)", total))
 }
 
 // handleReviewLoop implements the review cycle: reviewer checks target node's output,

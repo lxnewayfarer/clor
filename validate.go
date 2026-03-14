@@ -35,9 +35,11 @@ func ValidatePipeline(cfg PipelineConfig, projects []Project) []ValidationError 
 
 	// Build connectivity info
 	connected := make(map[string]bool)
+	hasUpstream := make(map[string]bool)
 	for _, e := range cfg.Edges {
 		connected[e.Source] = true
 		connected[e.Target] = true
+		hasUpstream[e.Target] = true
 	}
 
 	for _, n := range cfg.Nodes {
@@ -106,6 +108,15 @@ func ValidatePipeline(cfg PipelineConfig, projects []Project) []ValidationError 
 					}
 				}
 			}
+		}
+
+		// Decompose without upstream
+		if n.Config.Decompose && !hasUpstream[n.ID] {
+			errs = append(errs, ValidationError{
+				NodeID:  n.ID,
+				Level:   "warning",
+				Message: n.Label + ": decompose enabled but no upstream edges (no architect output to parse)",
+			})
 		}
 
 		// Isolated nodes (no connections)

@@ -57,6 +57,7 @@ type NodeDetail struct {
 	OutputArtifacts   []OutputArtifact `json:"output_artifacts,omitempty"`
 	TempFiles         []string         `json:"temp_files,omitempty"`
 	Interactive       bool             `json:"interactive,omitempty"`
+	Decompose         bool             `json:"decompose,omitempty"`
 	MaxQuestionRounds int              `json:"max_question_rounds,omitempty"`
 	MaxRetries        int              `json:"max_retries,omitempty"`
 	RetryDelaySeconds int              `json:"retry_delay_seconds,omitempty"`
@@ -92,4 +93,7 @@ type NodeStatus struct {
 	QuestionRound int        `json:"question_round,omitempty"`
 	RetryAttempt  int        `json:"retry_attempt,omitempty"`
 	ReviewRound   int        `json:"review_round,omitempty"`
+	SubtaskIndex  int        `json:"subtask_index,omitempty"`
+	SubtaskTotal  int        `json:"subtask_total,omitempty"`
+	SubtaskLabel  string     `json:"subtask_label,omitempty"`
 }
