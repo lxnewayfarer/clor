@@ -228,7 +228,7 @@ let redoStack = [];
 const MAX_UNDO = 50;
 
 const PRESETS = [
-  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and produce a detailed implementation plan.\n\nYour output MUST contain a "## Subtasks" section with a numbered list of independent, self-contained subtasks that downstream agents (coder, tester) will execute in parallel. Each subtask should be a clear, actionable description — one line per subtask.\n\nExample format:\n\n## Subtasks\n1. Refactor auth middleware to use JWT validation\n2. Add rate-limiting to /api/upload endpoint\n3. Update User model with email verification fields\n\nBefore the subtasks section, include any shared context, architectural decisions, or constraints that all subtasks depend on. Write the full plan to plan.md.'},
+  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and produce a detailed implementation plan.\n\nIf anything is unclear or ambiguous about the task, output a "## Questions" section with a numbered list of questions BEFORE producing the plan. Example:\n\n## Questions\n1. Should we support both PostgreSQL and SQLite?\n2. What is the expected request rate for the API?\n\nOnce you have enough clarity (or if the task is already clear), your output MUST contain a "## Subtasks" section with a numbered list of independent, self-contained subtasks that downstream agents (coder, tester) will execute in parallel. Each subtask should be a clear, actionable description — one line per subtask.\n\nExample format:\n\n## Subtasks\n1. Refactor auth middleware to use JWT validation\n2. Add rate-limiting to /api/upload endpoint\n3. Update User model with email verification fields\n\nBefore the subtasks section, include any shared context, architectural decisions, or constraints that all subtasks depend on. Write the full plan to plan.md.'},
   {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],prompt:'You are a CODER agent. Implement the following change:\n\n{subtask}\n\nContext from the architect plan: {read:plan.md}\n\nFull task description: {task}\n\nFocus only on your assigned subtask. Do not modify code unrelated to it.'},
   {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the following change:\n\n{subtask}\n\nFull task description: {task}\n\nFocus only on testing your assigned subtask. Ensure all tests pass before finishing.'},
   {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.'},
@@ -482,16 +482,6 @@ function showConfigPanel(dfId) {
   if (d.type === 'task') {
     html += '<label>Text</label><textarea id="cf-text" rows="6">'+ esc(d.text||'')+'</textarea>';
     html += '<div class="hint">Use this to define the task for the pipeline</div>';
-
-    // Project (single dropdown for task)
-    if (!d.projectIds) d.projectIds = d.projectId ? [d.projectId] : [];
-    html += '<label>Project <span style="color:var(--red)">*</span></label><select id="cf-project-single">';
-    html += '<option value="">— select project —</option>';
-    projects.forEach(p => {
-      const sel = (d.projectIds[0] === p.id) ? ' selected' : '';
-      html += '<option value="'+p.id+'"'+sel+'>'+esc(p.alias)+'</option>';
-    });
-    html += '</select>';
   } else {
     // Description for agents too
     html += '<label>Description</label><textarea id="cf-desc" rows="3">'+ esc(d.description||'')+'</textarea>';
@@ -546,16 +536,20 @@ function showConfigPanel(dfId) {
     html += '<label>Temp files <span style="color:var(--text3);font-size:10px">(cleaned up after run)</span></label>';
     html += '<input id="cf-temp-files" value="'+esc((d.tempFiles||[]).join(', '))+'" placeholder="plan.md, review.md" />';
 
-    // Interactive mode
-    const intEnabled = d.interactive ? true : false;
-    html += '<label><input type="checkbox" id="cf-interactive" style="width:auto;margin-right:4px"'+(intEnabled?' checked':'')+'/> Interactive (ask questions)</label>';
-    html += '<div id="cf-interactive-config" style="margin-top:4px;'+(intEnabled?'':'display:none')+'">';
-    html += '<label>Max question rounds</label><input type="number" id="cf-max-q-rounds" value="'+(d.maxQuestionRounds||3)+'" min="1" max="10" style="width:80px" />';
-    html += '</div>';
-    html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
+    // Node label for conditional sections
+    const nodeLabel = (d.label||'').toLowerCase();
+
+    // Interactive mode (only for architect)
+    if (nodeLabel.includes('architect')) {
+      const intEnabled = d.interactive ? true : false;
+      html += '<label><input type="checkbox" id="cf-interactive" style="width:auto;margin-right:4px"'+(intEnabled?' checked':'')+'/> Interactive (ask questions)</label>';
+      html += '<div id="cf-interactive-config" style="margin-top:4px;'+(intEnabled?'':'display:none')+'">';
+      html += '<label>Max question rounds</label><input type="number" id="cf-max-q-rounds" value="'+(d.maxQuestionRounds||3)+'" min="1" max="10" style="width:80px" />';
+      html += '</div>';
+      html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
+    }
 
     // Decompose mode (only for coder/tester nodes)
-    const nodeLabel = (d.label||'').toLowerCase();
     if (nodeLabel.includes('coder') || nodeLabel.includes('tester')) {
       const decEnabled = d.decompose ? true : false;
       html += '<label><input type="checkbox" id="cf-decompose" style="width:auto;margin-right:4px"'+(decEnabled?' checked':'')+'/> Decompose subtasks</label>';
