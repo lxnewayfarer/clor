@@ -252,6 +252,14 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 	upstreamOutput := o.getUpstreamOutput(nodeID)
 	subtasks := ParseSubtasks(upstreamOutput)
 
+	// If no subtasks in upstream log, try plan.md in workdir
+	if len(subtasks) == 0 {
+		planData, err := os.ReadFile(filepath.Join(workdir, "plan.md"))
+		if err == nil {
+			subtasks = ParseSubtasks(string(planData))
+		}
+	}
+
 	if len(subtasks) == 0 {
 		// Fallback: no subtasks found, run as normal agent
 		maxRounds := node.Config.MaxQuestionRounds
