@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>clor — pipeline editor</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0e1015;--bg2:#171b22;--bg3:#1f242e;--bg4:#282e3a;
+  --border:#2a3040;--border2:#3a4258;
+  --text:#d8dae0;--text2:#7c8190;--text3:#505566;
+  --accent:#6e78ff;--accent2:#8b93ff;
+  --green:#34d399;--amber:#fbbf24;--red:#f87171;
+  --teal:#2dd4bf;--purple:#a78bfa;--coral:#fb923c;
+  --mono:'SF Mono','Cascadia Code','Fira Code',monospace;
+  --sans:-apple-system,system-ui,'Segoe UI',sans-serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+button{font-family:var(--sans);cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--text);padding:5px 12px;border-radius:5px;font-size:13px}
+button:hover{background:var(--bg4);border-color:var(--border2)}
+input,textarea,select{font-family:var(--sans);background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:6px 9px;font-size:13px;width:100%}
+textarea{font-family:var(--mono);resize:vertical;line-height:1.5}
+select{cursor:pointer}
+label{font-size:12px;color:var(--text2);display:block;margin:8px 0 3px}
+
+header{display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg2);border-bottom:1px solid var(--border);height:44px;flex-shrink:0}
+header input{max-width:200px;font-weight:500;font-size:14px;background:transparent;border:none}
+header input:focus{outline:1px solid var(--accent);border-radius:3px}
+#project-badges{display:flex;gap:4px;margin-left:8px;flex:1}
+.proj-badge{font-size:11px;padding:2px 7px;border-radius:8px;cursor:pointer;opacity:.8}
+.proj-badge:hover{opacity:1}
+header .spacer{flex:1}
+.btn-run{background:var(--green)22;color:var(--green);border-color:var(--green)44}
+.btn-run:hover{background:var(--green)33}
+.btn-stop{background:var(--red)22;color:var(--red);border-color:var(--red)44}
+.btn-stop:hover{background:var(--red)33}
+
+#app{display:flex;flex:1;overflow:hidden}
+
+#sidebar{width:210px;background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0;padding:8px}
+#sidebar h4{font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px;display:flex;align-items:center;justify-content:space-between}
+
+.preset{padding:6px 8px;border-radius:6px;cursor:grab;font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:2px;border:1px solid transparent;user-select:none}
+.preset:hover{background:var(--bg3);border-color:var(--border)}
+.preset .icon{font-size:15px}
+
+.project-row{display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:5px;font-size:12px;cursor:pointer;margin-bottom:1px}
+.project-row:hover{background:var(--bg3)}
+.project-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+.pipeline-item{padding:4px 8px;border-radius:5px;font-size:12px;cursor:pointer;margin-bottom:1px;display:flex;align-items:center;justify-content:space-between}
+.pipeline-item:hover{background:var(--bg3)}
+.pipeline-item .del{opacity:0;color:var(--red);cursor:pointer;font-size:11px}
+.pipeline-item:hover .del{opacity:1}
+
+#canvas{flex:1;position:relative}
+
+#config-panel{width:320px;background:var(--bg2);border-left:1px solid var(--border);overflow-y:auto;padding:12px;flex-shrink:0}
+#config-panel.hidden{display:none}
+#config-panel h3{font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+
+footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--bg2);border-top:1px solid var(--border);height:30px;font-size:12px;color:var(--text2);flex-shrink:0}
+#log-viewer{position:absolute;bottom:30px;left:0;right:0;height:200px;background:var(--bg2);border-top:1px solid var(--border);overflow:auto;font-family:var(--mono);font-size:12px;padding:8px 12px;white-space:pre-wrap;color:var(--text2);z-index:100}
+#log-viewer.hidden{display:none}
+
+.drawflow{background:var(--bg)!important;background-image:radial-gradient(var(--border) 1px,transparent 1px)!important;background-size:20px 20px!important}
+.drawflow .drawflow-node{background:var(--bg2);border:1px solid var(--border);border-radius:8px;color:var(--text);min-width:180px;padding:0}
+.drawflow .drawflow-node.selected{border-color:var(--accent);box-shadow:0 0 0 2px rgba(110,120,255,.2)}
+.drawflow .drawflow-node .inputs,.drawflow .drawflow-node .outputs{position:relative}
+.drawflow .drawflow-node .input,.drawflow .drawflow-node .output{width:10px;height:10px;background:var(--bg4);border:2px solid var(--border2);border-radius:50%}
+.drawflow .drawflow-node .input:hover,.drawflow .drawflow-node .output:hover{background:var(--accent);border-color:var(--accent)}
+.drawflow .connection .main-path{stroke:var(--border2);stroke-width:2}
+.drawflow .drawflow-delete{display:none}
+
+.node-inner{padding:8px 10px;position:relative}
+.node-header{display:flex;align-items:center;gap:5px;margin-bottom:4px}
+.node-icon{font-size:15px;line-height:1}
+.node-label{font-size:13px;font-weight:500;flex:1}
+.node-project-pill{font-size:10px;padding:1px 6px;border-radius:6px;font-weight:500}
+.node-tools{display:flex;flex-wrap:wrap;gap:2px}
+.tool-pill{font-size:10px;padding:1px 5px;background:var(--bg4);border-radius:3px;color:var(--text2)}
+.node-desc{font-size:12px;color:var(--text2);margin-top:2px;max-height:36px;overflow:hidden}
+.node-status{font-size:11px;margin-top:4px}
+.node-delete-btn{position:absolute;top:4px;right:4px;background:none;border:none;color:var(--text3);font-size:14px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
+.node-delete-btn:hover{color:var(--red);background:none;border:none}
+.drawflow-node:hover .node-delete-btn{opacity:1}
+.s-running{color:var(--amber)}.s-done{color:var(--green)}.s-error{color:var(--red)}.s-queued{color:var(--text3)}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:999}
+.modal-overlay.hidden{display:none}
+.modal-body{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;min-width:400px;max-width:600px;max-height:80vh;overflow-y:auto}
+.modal-body h3{font-size:15px;margin-bottom:12px}
+.modal-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.modal-row input[type=color]{width:28px;height:28px;padding:0;border:none;cursor:pointer;border-radius:4px}
+.modal-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:12px}
+
+.hint{font-size:11px;color:var(--text3);margin-top:2px}
+.tools-grid{display:flex;flex-wrap:wrap;gap:4px}
+.tool-check{font-size:12px;display:flex;align-items:center;gap:3px;padding:2px 6px;background:var(--bg3);border-radius:4px;cursor:pointer}
+.tool-check input{width:auto;margin:0}
+.artifact-row{display:flex;gap:4px;align-items:center;margin-bottom:4px;font-size:12px}
+.artifact-row input{flex:1}
+.artifact-row select{width:120px}
+.review-config{margin-top:6px;padding:8px;background:var(--bg3);border-radius:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <span style="font-weight:600;font-size:13px;color:var(--accent)">clor</span>
+  <input id="pipeline-name" value="untitled" spellcheck="false"/>
+  <div id="project-badges"></div>
+  <div class="spacer"></div>
+  <button onclick="savePipeline()">Save</button>
+  <button onclick="downloadJSON()">Export</button>
+  <button onclick="importJSON()">Import</button>
+  <button class="btn-run" onclick="runPipeline()" id="btn-run">&#9654; Run</button>
+</header>
+
+<div id="app">
+  <aside id="sidebar">
+    <h4>Agents</h4>
+    <div id="presets"></div>
+    <h4>Projects <button onclick="openProjectModal()" style="font-size:10px;padding:1px 5px">+</button></h4>
+    <div id="project-list"></div>
+    <h4>Saved</h4>
+    <div id="pipeline-list"></div>
+  </aside>
+  <main id="canvas"></main>
+  <aside id="config-panel" class="hidden">
+    <div id="config-content"></div>
+  </aside>
+</div>
+
+<footer>
+  <span id="run-status">idle</span>
+  <div class="spacer"></div>
+  <button onclick="toggleLogs()">logs</button>
+</footer>
+<pre id="log-viewer" class="hidden"></pre>
+
+<div id="project-modal" class="modal-overlay hidden">
+  <div class="modal-body">
+    <h3>Manage projects</h3>
+    <div id="modal-project-list"></div>
+    <button onclick="addProjectRow()">+ Add project</button>
+    <div class="modal-actions">
+      <button onclick="saveProjects()">Save</button>
+      <button onclick="closeProjectModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
+<script>
+// ── STATE ──────────────────────────────────
+let projects = [];
+let nodeCounter = 0;
+let selectedNodeId = null;
+let currentRunId = null;
+let pollTimer = null;
+
+const PRESETS = [
+  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and create an implementation plan in plan.md.'},
+  {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],prompt:'You are a CODER agent. Implement the changes described in {task}. Follow the plan in {read:plan.md}.'},
+  {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the code changes described in {task}.'},
+  {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.',reviewMode:true},
+  {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],prompt:'Summarize what was built for {task}. Read all changed files and produce a final report.'},
+  {type:'task',icon:'\u{1F4CC}',label:'Task'},
+  {type:'report',icon:'\u{1F3C1}',label:'Report'},
+];
+const ALL_TOOLS = ['Read','Write','Edit','Bash','Glob','Grep'];
+
+// ── DRAWFLOW INIT ──────────────────────────
+const canvasEl = document.getElementById('canvas');
+const editor = new Drawflow(canvasEl);
+editor.reroute = true;
+editor.curvature = 0.5;
+editor.reroute_curvature_start_end = 0.5;
+editor.reroute_curvature = 0.5;
+editor.force_first_input = false;
+editor.start();
+
+// ── NODE HTML ──────────────────────────────
+function nodeHTML(data) {
+  const pc = data.projectColor || 'var(--text3)';
+  const pa = data.projectAlias || '';
+  const pills = (data.projectIds||[]).length > 0
+    ? (data.projectIds||[]).map(pid => { const p = projects.find(x=>x.id===pid); return p ? '<span class="node-project-pill" style="background:'+p.color+'18;color:'+p.color+'">'+p.alias+'</span>' : ''; }).join(' ')
+    : (pa ? '<span class="node-project-pill" style="background:'+pc+'18;color:'+pc+'">'+pa+'</span>' : '');
+  const tools = (data.tools||[]).map(t => '<span class="tool-pill">'+t+'</span>').join('');
+  const status = '<div class="node-status" id="ns-'+data.nodeId+'"></div>';
+  const delBtn = '<button class="node-delete-btn" onclick="deleteNodeBtn(\''+data.nodeId+'\',event)" title="Delete node">&times;</button>';
+
+  if (data.type === 'task') return '<div class="node-inner" style="border-left:3px solid var(--green)">' + delBtn +
+    '<div class="node-header"><span class="node-icon">\u{1F4CC}</span><span class="node-label">'+(data.label||'Task')+'</span></div>' +
+    '<div class="node-desc">'+(data.description||'click to edit').slice(0,80)+'</div>'+status+'</div>';
+
+  if (data.type === 'report') return '<div class="node-inner" style="border-left:3px solid var(--text3)">' + delBtn +
+    '<div class="node-header"><span class="node-icon">\u{1F3C1}</span><span class="node-label">'+(data.label||'Report')+'</span>'+pills+'</div>'+status+'</div>';
+
+  return '<div class="node-inner" style="border-left:3px solid '+pc+'">' + delBtn +
+    '<div class="node-header"><span class="node-icon">'+(data.icon||'\u2699\uFE0F')+'</span>' +
+    '<span class="node-label">'+(data.label||'Agent')+'</span>'+pills+'</div>' +
+    '<div class="node-tools">'+tools+'</div>'+status+'</div>';
+}
+
+// ── ADD NODE ───────────────────────────────
+function addNode(preset, posX, posY) {
+  nodeCounter++;
+  const id = preset.type + '_' + nodeCounter;
+  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectColor:'', projectAlias:''});
+  if (preset.description) data.description = preset.description;
+
+  const inputs = preset.type === 'task' ? 0 : 1;
+  const outputs = preset.type === 'report' ? 0 : 1;
+
+  editor.addNode(id, inputs, outputs, posX, posY, '', data, nodeHTML(data));
+  return id;
+}
+
+// ── UPDATE NODE HTML ───────────────────────
+function updateNodeHTML(drawflowId) {
+  const info = editor.getNodeFromId(drawflowId);
+  if (!info) return;
+  const el = canvasEl.querySelector('#node-'+drawflowId+' .drawflow_content_node');
+  if (el) el.innerHTML = nodeHTML(info.data);
+}
+
+// ── DELETE NODE BUTTON ─────────────────────
+function deleteNodeBtn(nodeId, event) {
+  event.stopPropagation();
+  // Find drawflow ID from nodeId
+  const exp = editor.export();
+  const mod = exp.drawflow.Home.data;
+  for (const dfId of Object.keys(mod)) {
+    if (mod[dfId].data && mod[dfId].data.nodeId === nodeId) {
+      editor.removeNodeId('node-'+dfId);
+      if (selectedNodeId == dfId) {
+        selectedNodeId = null;
+        document.getElementById('config-panel').classList.add('hidden');
+      }
+      break;
+    }
+  }
+}
+
+// ── SNAP TO GRID ──────────────────────────
+const GRID_SIZE = 20;
+editor.on('nodeMoved', function(dfId) {
+  const node = editor.getNodeFromId(dfId);
+  if (!node) return;
+  const snappedX = Math.round(node.pos_x / GRID_SIZE) * GRID_SIZE;
+  const snappedY = Math.round(node.pos_y / GRID_SIZE) * GRID_SIZE;
+  if (snappedX !== node.pos_x || snappedY !== node.pos_y) {
+    const el = canvasEl.querySelector('#node-'+dfId);
+    if (el) {
+      el.style.left = snappedX + 'px';
+      el.style.top = snappedY + 'px';
+      node.pos_x = snappedX;
+      node.pos_y = snappedY;
+      editor.updateConnectionNodes('node-'+dfId);
+    }
+  }
+});
+
+// ── PRESETS SIDEBAR ────────────────────────
+(function renderPresets() {
+  const container = document.getElementById('presets');
+  PRESETS.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'preset';
+    div.draggable = true;
+    div.innerHTML = '<span class="icon">'+p.icon+'</span> '+p.label;
+    div.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', JSON.stringify(p));
+    });
+    div.addEventListener('dblclick', () => {
+      addNode(p, 300, 200 + Math.random() * 200);
+    });
+    container.appendChild(div);
+  });
+})();
+
+// ── CANVAS DROP ────────────────────────────
+canvasEl.addEventListener('dragover', e => e.preventDefault());
+canvasEl.addEventListener('drop', e => {
+  e.preventDefault();
+  try {
+    const preset = JSON.parse(e.dataTransfer.getData('text/plain'));
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / editor.zoom - editor.precanvas.getBoundingClientRect().left / editor.zoom + editor.precanvas.getBoundingClientRect().left / editor.zoom;
+    const y = (e.clientY - rect.top) / editor.zoom;
+    addNode(preset, x - 80, y - 30);
+  } catch(_) {}
+});
+
+// ── KEYBOARD: Delete + Ctrl+S ──────────────
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement.tagName;
+  const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  if (e.key === 'Delete' && selectedNodeId && !inInput) {
+    editor.removeNodeId('node-'+selectedNodeId);
+    selectedNodeId = null;
+    document.getElementById('config-panel').classList.add('hidden');
+  }
+  if (e.ctrlKey && e.key === 's') {
+    e.preventDefault();
+    savePipeline();
+  }
+});
+
+// ── NODE SELECTION → CONFIG PANEL ──────────
+editor.on('nodeSelected', function(dfId) {
+  selectedNodeId = dfId;
+  showConfigPanel(dfId);
+});
+editor.on('nodeUnselected', function() {
+  selectedNodeId = null;
+  document.getElementById('config-panel').classList.add('hidden');
+});
+
+function getAllNodeIds() {
+  const exp = editor.export();
+  const mod = exp.drawflow.Home.data;
+  const result = [];
+  Object.keys(mod).forEach(k => {
+    const d = mod[k].data;
+    if (d && d.nodeId) result.push({id: d.nodeId, label: d.label || d.nodeId});
+  });
+  return result;
+}
+
+function showConfigPanel(dfId) {
+  const info = editor.getNodeFromId(dfId);
+  if (!info) return;
+  const d = info.data;
+  const panel = document.getElementById('config-panel');
+  const content = document.getElementById('config-content');
+  panel.classList.remove('hidden');
+
+  let html = '<h3>'+(d.icon||'')+' '+esc(d.label)+'</h3>';
+  html += '<label>Label</label><input id="cf-label" value="'+esc(d.label||'')+'" />';
+
+  if (d.type === 'task') {
+    html += '<label>Description</label><textarea id="cf-desc" rows="6">'+ esc(d.description||'')+'</textarea>';
+    html += '<div class="hint">Use this to define the task for the pipeline</div>';
+  } else {
+    // Project
+    html += '<label>Project</label><select id="cf-project"><option value="">— none —</option>';
+    projects.forEach(p => {
+      html += '<option value="'+p.id+'"'+(d.projectId===p.id?' selected':'')+'>'+esc(p.alias)+' ('+esc(p.path)+')</option>';
+    });
+    html += '</select>';
+
+    // Prompt
+    html += '<label>Prompt</label><textarea id="cf-prompt" rows="8">'+esc(d.prompt||'')+'</textarea>';
+    html += '<div class="hint">{task} {read:file} {read:alias:file} {files:path/} {review_issues}</div>';
+
+    // Model
+    html += '<label>Model override</label><input id="cf-model" value="'+esc(d.modelOverride||'')+'" placeholder="default" />';
+
+    // Tools
+    html += '<label>Tools</label><div class="tools-grid">';
+    ALL_TOOLS.forEach(t => {
+      const checked = (d.tools||[]).includes(t) ? ' checked' : '';
+      html += '<label class="tool-check"><input type="checkbox" data-tool="'+t+'"'+checked+'> '+t+'</label>';
+    });
+    html += '</div>';
+
+    // Output artifacts
+    if (!d.outputArtifacts) d.outputArtifacts = [];
+    html += '<label>Output artifacts <button id="cf-add-artifact" style="font-size:10px;padding:1px 5px">+</button></label>';
+    html += '<div id="cf-artifacts"></div>';
+
+    // Review mode
+    const rmEnabled = d.reviewMode ? true : false;
+    html += '<label><input type="checkbox" id="cf-review-enabled" style="width:auto;margin-right:4px"'+(rmEnabled?' checked':'')+'/> Review mode</label>';
+    html += '<div id="cf-review-config" class="review-config"'+(rmEnabled?'':' style="display:none"')+'></div>';
+  }
+
+  content.innerHTML = html;
+
+  // ── Bind events ──
+  const labelInput = document.getElementById('cf-label');
+  if (labelInput) labelInput.addEventListener('input', () => {
+    info.data.label = labelInput.value;
+    updateNodeHTML(dfId);
+  });
+
+  const descInput = document.getElementById('cf-desc');
+  if (descInput) descInput.addEventListener('input', () => {
+    info.data.description = descInput.value;
+    updateNodeHTML(dfId);
+  });
+
+  const projSelect = document.getElementById('cf-project');
+  if (projSelect) projSelect.addEventListener('change', () => {
+    info.data.projectId = projSelect.value;
+    const p = projects.find(x => x.id === projSelect.value);
+    info.data.projectColor = p ? p.color : '';
+    info.data.projectAlias = p ? p.alias : '';
+    updateNodeHTML(dfId);
+  });
+
+  const promptInput = document.getElementById('cf-prompt');
+  if (promptInput) promptInput.addEventListener('input', () => {
+    info.data.prompt = promptInput.value;
+  });
+
+  const modelInput = document.getElementById('cf-model');
+  if (modelInput) modelInput.addEventListener('input', () => {
+    info.data.modelOverride = modelInput.value;
+  });
+
+  content.querySelectorAll('[data-tool]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const tools = [];
+      content.querySelectorAll('[data-tool]:checked').forEach(c => tools.push(c.dataset.tool));
+      info.data.tools = tools;
+      updateNodeHTML(dfId);
+    });
+  });
+
+  // ── Artifacts UI ──
+  function renderArtifacts() {
+    const container = document.getElementById('cf-artifacts');
+    if (!container) return;
+    container.innerHTML = '';
+    (d.outputArtifacts||[]).forEach((art, i) => {
+      const row = document.createElement('div');
+      row.className = 'artifact-row';
+      row.innerHTML =
+        '<input placeholder="file path" value="'+esc(art.file||'')+'" data-ai="'+i+'" class="art-file" />' +
+        '<select data-ai="'+i+'" class="art-target" multiple style="width:120px;height:48px">' +
+        projects.map(p => '<option value="'+p.id+'"'+((art.deliver_to||[]).includes(p.id)?' selected':'')+'>'+esc(p.alias)+'</option>').join('') +
+        '</select>' +
+        '<button data-ai="'+i+'" class="art-del" style="color:var(--red);border:none;background:none">x</button>';
+      container.appendChild(row);
+    });
+    container.querySelectorAll('.art-file').forEach(el => {
+      el.addEventListener('input', () => {
+        d.outputArtifacts[+el.dataset.ai].file = el.value;
+      });
+    });
+    container.querySelectorAll('.art-target').forEach(el => {
+      el.addEventListener('change', () => {
+        d.outputArtifacts[+el.dataset.ai].deliver_to = Array.from(el.selectedOptions).map(o => o.value);
+      });
+    });
+    container.querySelectorAll('.art-del').forEach(el => {
+      el.addEventListener('click', () => {
+        d.outputArtifacts.splice(+el.dataset.ai, 1);
+        renderArtifacts();
+      });
+    });
+  }
+
+  const addArtBtn = document.getElementById('cf-add-artifact');
+  if (addArtBtn) {
+    addArtBtn.addEventListener('click', () => {
+      d.outputArtifacts.push({file:'', deliver_to:[]});
+      renderArtifacts();
+    });
+    renderArtifacts();
+  }
+
+  // ── Review mode UI ──
+  function renderReviewConfig() {
+    const container = document.getElementById('cf-review-config');
+    if (!container) return;
+    if (!d.reviewMode) {
+      container.style.display = 'none';
+      return;
+    }
+    container.style.display = '';
+    if (!d.reviewFixTargets) d.reviewFixTargets = {};
+    const allNodes = getAllNodeIds().filter(n => n.id !== d.nodeId);
+    const sections = ['code_issues', 'test_issues'];
+    let h = '<div class="hint" style="margin-bottom:6px">Map review sections to fix targets:</div>';
+    sections.forEach(sec => {
+      h += '<div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;font-size:11px">' +
+        '<span style="min-width:80px">'+sec+'</span>' +
+        '<select data-sec="'+sec+'" class="rv-target"><option value="">— none —</option>' +
+        allNodes.map(n => '<option value="'+n.id+'"'+(d.reviewFixTargets[sec]===n.id?' selected':'')+'>'+esc(n.label)+'</option>').join('') +
+        '</select></div>';
+    });
+    container.innerHTML = h;
+    container.querySelectorAll('.rv-target').forEach(el => {
+      el.addEventListener('change', () => {
+        if (el.value) d.reviewFixTargets[el.dataset.sec] = el.value;
+        else delete d.reviewFixTargets[el.dataset.sec];
+      });
+    });
+  }
+
+  const reviewCheck = document.getElementById('cf-review-enabled');
+  if (reviewCheck) {
+    reviewCheck.addEventListener('change', () => {
+      d.reviewMode = reviewCheck.checked;
+      if (!d.reviewMode) d.reviewFixTargets = {};
+      renderReviewConfig();
+    });
+    renderReviewConfig();
+  }
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── PROJECTS ───────────────────────────────
+async function loadProjectsFromServer() {
+  try {
+    const res = await fetch('/api/projects');
+    const data = await res.json();
+    projects = data.projects || [];
+  } catch(_) { projects = []; }
+  renderProjects();
+}
+
+function openProjectModal() {
+  document.getElementById('project-modal').classList.remove('hidden');
+  renderModalProjects();
+}
+
+function closeProjectModal() {
+  document.getElementById('project-modal').classList.add('hidden');
+}
+
+function renderModalProjects() {
+  const container = document.getElementById('modal-project-list');
+  container.innerHTML = '';
+  projects.forEach((p, i) => {
+    container.innerHTML += '<div class="modal-row">' +
+      '<input type="color" value="'+(p.color||'#6e78ff')+'" data-idx="'+i+'" class="mp-color" />' +
+      '<input placeholder="alias" value="'+esc(p.alias||'')+'" data-idx="'+i+'" class="mp-alias" style="width:80px" />' +
+      '<input placeholder="/path/to/project" value="'+esc(p.path||'')+'" data-idx="'+i+'" class="mp-path" />' +
+      '<button onclick="removeProject('+i+')" style="color:var(--red);border:none;background:none">x</button>' +
+      '</div>';
+  });
+}
+
+function addProjectRow() {
+  projects.push({id: 'p'+Date.now(), alias:'', path:'', color:'#6e78ff', description:''});
+  renderModalProjects();
+}
+
+function removeProject(i) {
+  projects.splice(i, 1);
+  renderModalProjects();
+}
+
+async function saveProjects() {
+  // Read values from modal inputs
+  document.querySelectorAll('.mp-alias').forEach(el => { projects[+el.dataset.idx].alias = el.value; });
+  document.querySelectorAll('.mp-path').forEach(el => { projects[+el.dataset.idx].path = el.value; });
+  document.querySelectorAll('.mp-color').forEach(el => { projects[+el.dataset.idx].color = el.value; });
+
+  await fetch('/api/projects', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({projects})
+  });
+  renderProjects();
+  closeProjectModal();
+}
+
+// ── PIPELINE SAVE / LOAD ───────────────────
+function buildPipelineJSON() {
+  const exportData = editor.export();
+  const module = exportData.drawflow.Home.data;
+  const nodes = [];
+  const edges = [];
+
+  Object.keys(module).forEach(dfId => {
+    const n = module[dfId];
+    const d = n.data;
+    nodes.push({
+      id: d.nodeId,
+      type: d.type,
+      label: d.label || '',
+      pos: {x: n.pos_x, y: n.pos_y},
+      config: {
+        description: d.description || '',
+        project_id: d.projectId || '',
+        prompt: d.prompt || '',
+        allowed_tools: d.tools || [],
+        model_override: d.modelOverride || '',
+        output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
+        review_mode: d.reviewMode ? {enabled:true, pass_pattern:'(?i)review\\s*status:\\s*pass', fail_pattern:'(?i)review\\s*status:\\s*fail', fix_targets: d.reviewFixTargets || {}} : null,
+      }
+    });
+
+    // Collect edges from outputs
+    Object.keys(n.outputs).forEach(outKey => {
+      n.outputs[outKey].connections.forEach(conn => {
+        const targetNode = module[conn.node];
+        if (targetNode) {
+          edges.push({source: d.nodeId, target: targetNode.data.nodeId});
+        }
+      });
+    });
+  });
+
+  return {
+    version: 1,
+    name: document.getElementById('pipeline-name').value || 'untitled',
+    settings: {model:'', timeout_seconds:600, max_review_retries:3},
+    nodes,
+    edges
+  };
+}
+
+async function savePipeline() {
+  const config = buildPipelineJSON();
+  const name = config.name.replace(/[^a-zA-Z0-9_-]/g, '-');
+  await fetch('/api/pipelines/'+encodeURIComponent(name), {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(config)
+  });
+  loadPipelineList();
+  document.getElementById('run-status').textContent = 'saved: ' + name;
+}
+
+function downloadJSON() {
+  const config = buildPipelineJSON();
+  const blob = new Blob([JSON.stringify(config, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (config.name || 'pipeline') + '.json';
+  a.click();
+}
+
+async function loadPipelineList() {
+  try {
+    const res = await fetch('/api/pipelines');
+    const data = await res.json();
+    const list = document.getElementById('pipeline-list');
+    list.innerHTML = '';
+    (data.pipelines||[]).forEach(name => {
+      list.innerHTML += '<div class="pipeline-item" onclick="loadPipeline(\''+esc(name)+'\')">' +
+        '<span>'+esc(name)+'</span>' +
+        '<span class="del" onclick="event.stopPropagation();deletePipeline(\''+esc(name)+'\')">x</span></div>';
+    });
+  } catch(_) {}
+}
+
+async function loadPipeline(name) {
+  try {
+    const res = await fetch('/api/pipelines/'+encodeURIComponent(name));
+    const config = await res.json();
+    editor.clear();
+    nodeCounter = 0;
+    document.getElementById('pipeline-name').value = config.name || name;
+
+    const idToDF = {};
+    (config.nodes||[]).forEach(n => {
+      nodeCounter++;
+      const proj = projects.find(p => p.id === n.config.project_id);
+      const data = {
+        type: n.type,
+        icon: n.type==='task'?'\u{1F4CC}':n.type==='report'?'\u{1F3C1}':'\u{1F4BB}',
+        label: n.label,
+        tools: n.config.allowed_tools || [],
+        prompt: n.config.prompt || '',
+        description: n.config.description || '',
+        modelOverride: n.config.model_override || '',
+        reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
+        reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
+        outputArtifacts: n.config.output_artifacts || [],
+        projectId: n.config.project_id || '',
+        nodeId: n.id,
+        projectColor: proj ? proj.color : '',
+        projectAlias: proj ? proj.alias : '',
+      };
+
+      const inputs = n.type === 'task' ? 0 : 1;
+      const outputs = n.type === 'report' ? 0 : 1;
+      const px = n.pos ? n.pos.x : 200 + Math.random()*400;
+      const py = n.pos ? n.pos.y : 100 + Math.random()*300;
+
+      const dfId = editor.addNode(n.id, inputs, outputs, px, py, '', data, nodeHTML(data));
+      idToDF[n.id] = dfId;
+    });
+
+    // Restore edges
+    (config.edges||[]).forEach(e => {
+      const srcDF = idToDF[e.source];
+      const tgtDF = idToDF[e.target];
+      if (srcDF && tgtDF) {
+        editor.addConnection(srcDF, tgtDF, 'output_1', 'input_1');
+      }
+    });
+
+    document.getElementById('run-status').textContent = 'loaded: ' + name;
+  } catch(err) {
+    console.error('load error', err);
+  }
+}
+
+async function deletePipeline(name) {
+  await fetch('/api/pipelines/'+encodeURIComponent(name), {method:'DELETE'});
+  loadPipelineList();
+}
+
+// ── RUN ────────────────────────────────────
+async function runPipeline() {
+  const config = buildPipelineJSON();
+  if (!config.nodes.length) return;
+
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    currentRunId = data.run_id;
+    document.getElementById('run-status').textContent = 'running: ' + currentRunId;
+    document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
+    document.getElementById('btn-run').className = 'btn-stop';
+    document.getElementById('btn-run').onclick = stopRun;
+    startPolling();
+  } catch(err) {
+    document.getElementById('run-status').textContent = 'error: ' + err.message;
+  }
+}
+
+async function stopRun() {
+  if (currentRunId) {
+    await fetch('/api/run/'+currentRunId+'/stop', {method:'POST'});
+  }
+  stopPolling();
+  document.getElementById('btn-run').innerHTML = '\u25B6 Run';
+  document.getElementById('btn-run').className = 'btn-run';
+  document.getElementById('btn-run').onclick = runPipeline;
+  document.getElementById('run-status').textContent = 'stopped';
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 1000);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollStatus() {
+  if (!currentRunId) return;
+  try {
+    const res = await fetch('/api/run/'+currentRunId+'/status');
+    const statuses = await res.json();
+    let allDone = true;
+
+    Object.keys(statuses).forEach(nodeId => {
+      const s = statuses[nodeId];
+      const el = document.getElementById('ns-'+nodeId);
+      if (el) {
+        let cls = 's-'+s.status;
+        let text = s.status;
+        if (s.status === 'running') text += ' ' + s.elapsed + 's';
+        if (s.message) text += ' — ' + s.message;
+        el.className = 'node-status ' + cls;
+        el.textContent = text;
+      }
+      if (s.status !== 'done' && s.status !== 'error' && s.status !== 'idle') allDone = false;
+    });
+
+    if (allDone && Object.keys(statuses).length > 0) {
+      stopPolling();
+      document.getElementById('btn-run').innerHTML = '\u25B6 Run';
+      document.getElementById('btn-run').className = 'btn-run';
+      document.getElementById('btn-run').onclick = runPipeline;
+      document.getElementById('run-status').textContent = 'done';
+    }
+  } catch(_) {}
+}
+
+// ── LOG VIEWER ─────────────────────────────
+function toggleLogs() {
+  document.getElementById('log-viewer').classList.toggle('hidden');
+  if (!document.getElementById('log-viewer').classList.contains('hidden') && selectedNodeId) {
+    loadNodeLog(selectedNodeId);
+  }
+}
+
+async function loadNodeLog(dfId) {
+  if (!currentRunId) return;
+  const info = editor.getNodeFromId(dfId);
+  if (!info) return;
+  const nodeId = info.data.nodeId;
+  try {
+    const res = await fetch('/api/run/'+currentRunId+'/logs/'+encodeURIComponent(nodeId));
+    const data = await res.json();
+    document.getElementById('log-viewer').textContent = data.log || 'No log yet.';
+  } catch(_) {}
+}
+
+editor.on('nodeSelected', function(dfId) {
+  if (!document.getElementById('log-viewer').classList.contains('hidden')) {
+    loadNodeLog(dfId);
+  }
+});
+
+// ── IMPORT JSON ────────────────────────────
+function importJSON() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const config = JSON.parse(text);
+      editor.clear();
+      nodeCounter = 0;
+      document.getElementById('pipeline-name').value = config.name || 'imported';
+
+      const idToDF = {};
+      (config.nodes||[]).forEach(n => {
+        nodeCounter++;
+        const proj = projects.find(p => p.id === n.config.project_id);
+        const data = {
+          type: n.type,
+          icon: n.type==='task'?'\u{1F4CC}':n.type==='report'?'\u{1F3C1}':'\u{1F4BB}',
+          label: n.label,
+          tools: n.config.allowed_tools || [],
+          prompt: n.config.prompt || '',
+          description: n.config.description || '',
+          modelOverride: n.config.model_override || '',
+          reviewMode: n.config.review_mode ? n.config.review_mode.enabled : false,
+          reviewFixTargets: n.config.review_mode ? (n.config.review_mode.fix_targets || {}) : {},
+          outputArtifacts: n.config.output_artifacts || [],
+          projectId: n.config.project_id || '',
+          nodeId: n.id,
+          projectColor: proj ? proj.color : '',
+          projectAlias: proj ? proj.alias : '',
+        };
+        const inputs = n.type === 'task' ? 0 : 1;
+        const outputs = n.type === 'report' ? 0 : 1;
+        const px = n.pos ? n.pos.x : 200 + Math.random()*400;
+        const py = n.pos ? n.pos.y : 100 + Math.random()*300;
+        const dfId = editor.addNode(n.id, inputs, outputs, px, py, '', data, nodeHTML(data));
+        idToDF[n.id] = dfId;
+      });
+
+      (config.edges||[]).forEach(e => {
+        const srcDF = idToDF[e.source];
+        const tgtDF = idToDF[e.target];
+        if (srcDF && tgtDF) editor.addConnection(srcDF, tgtDF, 'output_1', 'input_1');
+      });
+
+      document.getElementById('run-status').textContent = 'imported: ' + (config.name || file.name);
+    } catch(err) {
+      console.error('import error', err);
+      document.getElementById('run-status').textContent = 'import error: ' + err.message;
+    }
+  });
+  input.click();
+}
+
+// ── PROJECT HIGHLIGHT ──────────────────────
+function highlightProject(projectId) {
+  canvasEl.querySelectorAll('.drawflow-node').forEach(el => {
+    el.style.opacity = '1';
+  });
+  if (!projectId) return;
+  const exp = editor.export();
+  const mod = exp.drawflow.Home.data;
+  Object.keys(mod).forEach(dfId => {
+    const d = mod[dfId].data;
+    const el = canvasEl.querySelector('#node-'+dfId);
+    if (!el) return;
+    if (d.projectId && d.projectId !== projectId) {
+      el.style.opacity = '0.3';
+    }
+  });
+}
+
+// Add hover handlers to project badges
+function renderProjects() {
+  const list = document.getElementById('project-list');
+  const badges = document.getElementById('project-badges');
+  list.innerHTML = '';
+  badges.innerHTML = '';
+  projects.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'project-row';
+    row.innerHTML = '<span class="project-dot" style="background:'+p.color+'"></span>'+esc(p.alias);
+    row.addEventListener('mouseenter', () => highlightProject(p.id));
+    row.addEventListener('mouseleave', () => highlightProject(null));
+    list.appendChild(row);
+
+    const badge = document.createElement('span');
+    badge.className = 'proj-badge';
+    badge.style.cssText = 'background:'+p.color+'22;color:'+p.color;
+    badge.textContent = p.alias;
+    badge.addEventListener('mouseenter', () => highlightProject(p.id));
+    badge.addEventListener('mouseleave', () => highlightProject(null));
+    badges.appendChild(badge);
+  });
+}
+
+// ── KEYBOARD SHORTCUTS ─────────────────────
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement.tagName;
+  const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+  // Ctrl+D — duplicate selected node
+  if (e.ctrlKey && e.key === 'd' && selectedNodeId && !inInput) {
+    e.preventDefault();
+    const info = editor.getNodeFromId(selectedNodeId);
+    if (info) {
+      const d = Object.assign({}, info.data);
+      nodeCounter++;
+      d.nodeId = d.type + '_' + nodeCounter;
+      const inputs = d.type === 'task' ? 0 : 1;
+      const outputs = d.type === 'report' ? 0 : 1;
+      editor.addNode(d.nodeId, inputs, outputs, info.pos_x + 30, info.pos_y + 30, '', d, nodeHTML(d));
+    }
+  }
+
+  // Escape — deselect / close panels
+  if (e.key === 'Escape') {
+    if (!inInput) {
+      editor.dispatch('nodeUnselected');
+      selectedNodeId = null;
+      document.getElementById('config-panel').classList.add('hidden');
+    }
+    document.getElementById('log-viewer').classList.add('hidden');
+    document.getElementById('project-modal').classList.add('hidden');
+  }
+
+  // Ctrl+E — export
+  if (e.ctrlKey && e.key === 'e' && !inInput) {
+    e.preventDefault();
+    downloadJSON();
+  }
+
+  // Ctrl+Enter — run pipeline
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    if (currentRunId && pollTimer) stopRun();
+    else runPipeline();
+  }
+});
+
+// ── INIT ───────────────────────────────────
+loadProjectsFromServer();
+loadPipelineList();
+</script>
+</body>
+</html>

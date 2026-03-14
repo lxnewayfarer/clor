@@ -1,0 +1,28 @@
+# Build output
+clor
+clor-*
+dist/
+*.exe
+
+# Go
+*.test
+*.out
+*.prof
+*.pprof
+coverage.html
+
+# Runtime data (user-specific, lives in ~/.config/clor/)
+pipelines/
+runs/
+projects.json
+
+# OS
+.DS_Store
+Thumbs.db
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
