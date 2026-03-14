@@ -58,6 +58,10 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /api/run/{id}/retry/{nodeId}", handleRetryNode)
 	mux.HandleFunc("POST /api/run/{id}/answer/{nodeId}", handleSubmitAnswer)
 
+	// Run history
+	mux.HandleFunc("GET /api/runs", handleListRuns)
+	mux.HandleFunc("DELETE /api/runs/{id}", handleDeleteRun)
+
 	return mux
 }
 
@@ -446,6 +450,124 @@ func handleSubmitAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Run History ─────────────────────────────
+
+type RunSummary struct {
+	ID           string `json:"id"`
+	PipelineName string `json:"pipeline_name"`
+	CreatedAt    string `json:"created_at"`
+	NodeCount    int    `json:"node_count"`
+	DoneCount    int    `json:"done_count"`
+	ErrorCount   int    `json:"error_count"`
+}
+
+func handleListRuns(w http.ResponseWriter, r *http.Request) {
+	runsDir := filepath.Join(configDir(), "runs")
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"runs": []RunSummary{}})
+		return
+	}
+
+	type entryWithMtime struct {
+		entry os.DirEntry
+		mtime time.Time
+	}
+	var dirs []entryWithMtime
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		dirs = append(dirs, entryWithMtime{e, info.ModTime()})
+	}
+
+	// Sort newest first
+	for i := 0; i < len(dirs)-1; i++ {
+		for j := i + 1; j < len(dirs); j++ {
+			if dirs[j].mtime.After(dirs[i].mtime) {
+				dirs[i], dirs[j] = dirs[j], dirs[i]
+			}
+		}
+	}
+
+	limit := 20
+	if len(dirs) < limit {
+		limit = len(dirs)
+	}
+	dirs = dirs[:limit]
+
+	var runs []RunSummary
+	for _, d := range dirs {
+		id := d.entry.Name()
+		statusPath := filepath.Join(runsDir, id, "status.json")
+		data, err := os.ReadFile(statusPath)
+
+		var nodeCount, doneCount, errorCount int
+		var pipelineName string
+
+		if err == nil {
+			var statuses map[string]NodeStatus
+			if json.Unmarshal(data, &statuses) == nil {
+				nodeCount = len(statuses)
+				for _, s := range statuses {
+					if s.Status == "done" {
+						doneCount++
+					} else if s.Status == "error" {
+						errorCount++
+					}
+				}
+			}
+		}
+
+		// Try to read pipeline name from config
+		configPath := filepath.Join(runsDir, id, "config.json")
+		if cdata, cerr := os.ReadFile(configPath); cerr == nil {
+			var cfg struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(cdata, &cfg) == nil {
+				pipelineName = cfg.Name
+			}
+		}
+
+		runs = append(runs, RunSummary{
+			ID:           id,
+			PipelineName: pipelineName,
+			CreatedAt:    d.mtime.Format(time.RFC3339),
+			NodeCount:    nodeCount,
+			DoneCount:    doneCount,
+			ErrorCount:   errorCount,
+		})
+	}
+
+	if runs == nil {
+		runs = []RunSummary{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"runs": runs})
+}
+
+func handleDeleteRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !safeNameRe.MatchString(id) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
+	runDir := filepath.Join(configDir(), "runs", id)
+	if err := os.RemoveAll(runDir); err != nil {
+		http.Error(w, "failed to delete run", 500)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }

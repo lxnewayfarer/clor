@@ -18,6 +18,11 @@
   --mono:'SF Mono','Cascadia Code','Fira Code',monospace;
   --sans:-apple-system,system-ui,'Segoe UI',sans-serif;
 }
+:root[data-theme="light"]{
+  --bg:#f8f9fa;--bg2:#ffffff;--bg3:#f0f1f3;--bg4:#e8eaed;
+  --border:#d0d3db;--border2:#b8bcc8;
+  --text:#1a1d24;--text2:#4a4f5e;--text3:#8a90a0;
+}
 body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
 button{font-family:var(--sans);cursor:pointer;border:1px solid var(--border);background:var(--bg3);color:var(--text);padding:5px 12px;border-radius:5px;font-size:13px}
 button:hover{background:var(--bg4);border-color:var(--border2)}
@@ -63,8 +68,8 @@ header .spacer{flex:1}
 #config-panel h3{font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
 
 footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--bg2);border-top:1px solid var(--border);height:30px;font-size:12px;color:var(--text2);flex-shrink:0}
-#log-viewer{height:200px;background:var(--bg2);border-top:1px solid var(--border);overflow:auto;font-family:var(--mono);font-size:12px;padding:8px 12px;white-space:pre-wrap;color:var(--text2);flex-shrink:0}
-#log-viewer.hidden{display:none}
+#log-area{height:200px;background:var(--bg2);border-top:1px solid var(--border);flex-shrink:0;position:relative}
+#log-viewer{height:100%;overflow:auto;font-family:var(--mono);font-size:12px;padding:8px 12px;white-space:pre-wrap;color:var(--text2)}
 .resize-handle{background:transparent;z-index:50;flex-shrink:0}
 .resize-handle:hover,.resize-handle.active{background:var(--accent)44}
 .resize-h{width:4px;cursor:col-resize}
@@ -148,6 +153,86 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .var-row button{flex-shrink:0}
 .auto-layout-btn{background:var(--accent)22;color:var(--accent);border-color:var(--accent)44}
 .auto-layout-btn:hover{background:var(--accent)33}
+
+/* ── Toast Notifications ── */
+.toast-container{position:fixed;bottom:40px;right:12px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.toast{padding:8px 14px;border-radius:7px;font-size:13px;max-width:320px;pointer-events:all;opacity:1;transition:opacity .4s ease;border:1px solid var(--border)}
+.toast.toast-info{background:var(--bg3);color:var(--text)}
+.toast.toast-success{background:var(--green)22;color:var(--green);border-color:var(--green)44}
+.toast.toast-error{background:var(--red)22;color:var(--red);border-color:var(--red)44}
+.toast.toast-warning{background:var(--amber)22;color:var(--amber);border-color:var(--amber)44}
+.toast.fade-out{opacity:0}
+
+/* ── Empty Canvas State ── */
+#empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:1;gap:10px}
+#empty-state .es-icon{font-size:48px;opacity:.3}
+#empty-state .es-text{font-size:14px;color:var(--text3);border:2px dashed var(--border2);padding:18px 28px;border-radius:10px;text-align:center;line-height:1.6}
+#empty-state.hidden{display:none}
+
+/* ── Run History ── */
+.run-history-item{padding:5px 8px;border-radius:5px;font-size:11px;margin-bottom:2px;display:flex;align-items:center;justify-content:space-between;gap:4px}
+.run-history-item:hover{background:var(--bg3)}
+.run-history-item .rh-info{flex:1;overflow:hidden}
+.run-history-item .rh-id{color:var(--text2);font-family:var(--mono);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-history-item .rh-status{font-size:10px;color:var(--text3)}
+.run-history-item .rh-del{opacity:0;color:var(--red);cursor:pointer;font-size:10px;flex-shrink:0;background:none;border:none;padding:1px 4px}
+.run-history-item:hover .rh-del{opacity:1}
+
+/* ── Pipeline duplicate btn ── */
+.pipeline-item .dup{opacity:0;color:var(--accent);cursor:pointer;font-size:11px;margin-right:2px}
+.pipeline-item:hover .dup{opacity:1}
+
+/* ── Confirm Dialog ── */
+#confirm-modal .modal-body{min-width:320px;max-width:420px}
+#confirm-modal .confirm-msg{font-size:14px;margin-bottom:16px;line-height:1.5}
+#confirm-modal .btn-confirm{background:var(--red)22;color:var(--red);border-color:var(--red)44}
+#confirm-modal .btn-confirm:hover{background:var(--red)33}
+
+/* ── Connection color coding ── */
+.drawflow .conn-task-agent .main-path{stroke:var(--green)}
+.drawflow .conn-agent-reviewer .main-path{stroke:var(--purple)}
+.drawflow .conn-to-committer .main-path{stroke:var(--coral)}
+.drawflow .connection:hover .main-path{stroke-width:3}
+
+/* ── Zoom controls ── */
+#zoom-controls{position:absolute;bottom:12px;right:12px;z-index:100;display:flex;gap:4px;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:4px}
+#zoom-controls button{padding:2px 7px;font-size:14px;border:none;background:none;color:var(--text2)}
+#zoom-controls button:hover{background:var(--bg3);border-radius:4px}
+#zoom-pct{font-size:11px;color:var(--text3);min-width:36px;text-align:center}
+
+/* ── Shortcuts modal ── */
+#shortcuts-modal .modal-body{min-width:400px}
+#shortcuts-modal table{width:100%;border-collapse:collapse;font-size:13px}
+#shortcuts-modal td{padding:5px 8px;border-bottom:1px solid var(--border)}
+#shortcuts-modal td:first-child{white-space:nowrap}
+kbd{background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:1px 6px;font-size:11px;font-family:var(--mono)}
+#help-btn{font-size:13px;padding:3px 8px;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center}
+
+/* ── Theme toggle ── */
+#theme-toggle{font-size:14px;padding:3px 7px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:5px}
+
+/* ── Sidebar search ── */
+#sidebar-search-wrap{display:flex;gap:4px;margin-bottom:6px;align-items:center}
+#sidebar-search{flex:1;padding:4px 7px;font-size:12px}
+#sidebar-search-clear{flex-shrink:0;background:none;border:none;color:var(--text3);padding:2px 5px;cursor:pointer;font-size:14px}
+#sidebar-search-clear:hover{color:var(--text)}
+
+/* ── Config details/summary ── */
+#config-content details{margin-bottom:6px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#config-content details summary{cursor:pointer;padding:6px 10px;font-size:12px;color:var(--text2);background:var(--bg3);user-select:none;list-style:disclosure-closed}
+#config-content details[open] summary{list-style:disclosure-open;border-bottom:1px solid var(--border)}
+#config-content details summary::marker{color:var(--text3)}
+#config-content details .details-inner{padding:6px 0}
+
+/* ── Log follow button ── */
+#log-follow-btn{position:absolute;bottom:8px;right:16px;background:var(--bg4);border:1px solid var(--border2);border-radius:12px;font-size:11px;padding:3px 10px;cursor:pointer;color:var(--text2);z-index:10;display:none}
+#log-follow-btn:hover{color:var(--text);background:var(--bg3)}
+#log-area{position:relative;flex-shrink:0}
+#log-area.hidden{display:none}
+
+/* ── Node status animated icons ── */
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.status-icon-running{display:inline-block;animation:spin 1s linear infinite}
 </style>
 </head>
 <body>
@@ -156,26 +241,45 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
   <span style="font-weight:600;font-size:13px;color:var(--accent)">clor</span>
   <input id="pipeline-name" value="untitled" spellcheck="false"/>
   <div id="project-badges"></div>
+  <button id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme">☀</button>
   <div class="spacer"></div>
   <button onclick="savePipeline()">Save</button>
   <button onclick="downloadJSON()">Export</button>
   <button onclick="importJSON()">Import</button>
   <button class="auto-layout-btn" onclick="autoLayout()" title="Auto-arrange nodes by wave order">Layout</button>
   <button onclick="openVariablesModal()" title="Pipeline variables">Vars</button>
+  <button id="help-btn" onclick="toggleShortcutsHelp()" title="Keyboard shortcuts">?</button>
   <button class="btn-run" onclick="runPipeline()" id="btn-run">&#9654; Run</button>
 </header>
 
 <div id="app">
   <aside id="sidebar">
+    <div id="sidebar-search-wrap">
+      <input id="sidebar-search" placeholder="Filter..." oninput="filterSidebar(this.value)" />
+      <button id="sidebar-search-clear" onclick="clearSidebarSearch()" title="Clear">×</button>
+    </div>
     <h4>Agents</h4>
     <div id="presets"></div>
     <h4>Projects <button onclick="openProjectModal()" style="font-size:10px;padding:1px 5px">+</button></h4>
     <div id="project-list"></div>
     <h4>Saved</h4>
     <div id="pipeline-list"></div>
+    <h4>History</h4>
+    <div id="run-history-list"></div>
   </aside>
   <div class="resize-handle resize-h" id="rh-sidebar"></div>
-  <main id="canvas"></main>
+  <main id="canvas">
+    <div id="empty-state">
+      <div class="es-icon">📋</div>
+      <div class="es-text">Drag agents from the sidebar or double-click to add</div>
+    </div>
+    <div id="zoom-controls">
+      <button onclick="editor.zoom_out()" title="Zoom out">−</button>
+      <span id="zoom-pct">100%</span>
+      <button onclick="editor.zoom_reset()" title="Reset zoom">⊙</button>
+      <button onclick="editor.zoom_in()" title="Zoom in">+</button>
+    </div>
+  </main>
   <div class="resize-handle resize-h" id="rh-config"></div>
   <aside id="config-panel" class="hidden">
     <div id="config-content"></div>
@@ -183,7 +287,10 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 </div>
 
 <div class="resize-handle resize-v hidden" id="rh-logs"></div>
-<pre id="log-viewer" class="hidden"></pre>
+<div id="log-area" class="hidden">
+  <pre id="log-viewer"></pre>
+  <div id="log-follow-btn" onclick="scrollLogToBottom()">⬇ Follow</div>
+</div>
 <footer>
   <span id="run-status">idle</span>
   <div class="spacer"></div>
@@ -226,6 +333,36 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
   </div>
 </div>
 
+<div id="confirm-modal" class="modal-overlay hidden">
+  <div class="modal-body">
+    <div class="confirm-msg" id="confirm-msg">Are you sure?</div>
+    <div class="modal-actions">
+      <button class="btn-confirm" id="confirm-ok">Confirm</button>
+      <button id="confirm-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="shortcuts-modal" class="modal-overlay hidden" onclick="if(event.target===this)toggleShortcutsHelp()">
+  <div class="modal-body">
+    <h3>Keyboard Shortcuts</h3>
+    <table>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save pipeline</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate selected node</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Export pipeline JSON</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Run / Stop pipeline</td></tr>
+      <tr><td><kbd>Delete</kbd></td><td>Remove selected node</td></tr>
+      <tr><td><kbd>Escape</kbd></td><td>Deselect / Close panels</td></tr>
+      <tr><td><kbd>?</kbd> or <kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Show shortcuts</td></tr>
+    </table>
+    <div class="modal-actions"><button onclick="toggleShortcutsHelp()">Close</button></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
 <script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
 <script>
 // ── STATE ──────────────────────────────────
@@ -240,6 +377,7 @@ let pipelineVariables = [];
 let undoStack = [];
 let redoStack = [];
 const MAX_UNDO = 50;
+let logFollowing = true;
 
 const PRESETS = [
   {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],tempFiles:['plan.md'],prompt:'You are a system architect. Analyze {task} and produce a detailed implementation plan.\n\nIf anything is unclear or ambiguous about the task, output a "## Questions" section with a numbered list of questions BEFORE producing the plan. Example:\n\n## Questions\n1. Should we support both PostgreSQL and SQLite?\n2. What is the expected request rate for the API?\n\nOnce you have enough clarity (or if the task is already clear), your output MUST contain a "## Subtasks" section with a numbered list of independent, self-contained subtasks that downstream agents (coder, tester) will execute in parallel. Each subtask should be a clear, actionable description — one line per subtask.\n\nExample format:\n\n## Subtasks\n1. Refactor auth middleware to use JWT validation\n2. Add rate-limiting to /api/upload endpoint\n3. Update User model with email verification fields\n\nBefore the subtasks section, include any shared context, architectural decisions, or constraints that all subtasks depend on. Write the full plan to plan.md.'},
@@ -318,8 +456,10 @@ function updateNodeHTML(drawflowId) {
 }
 
 // ── DELETE NODE BUTTON ─────────────────────
-function deleteNodeBtn(nodeId, event) {
+async function deleteNodeBtn(nodeId, event) {
   event.stopPropagation();
+  const ok = await confirmDialog('Delete this node?');
+  if (!ok) return;
   // Find drawflow ID from nodeId
   const exp = editor.export();
   const mod = exp.drawflow.Home.data;
@@ -491,18 +631,25 @@ function showConfigPanel(dfId) {
   panel.classList.remove('hidden');
 
   let html = '<h3>'+(d.icon||'')+' '+esc(d.label)+'</h3>';
-  html += '<label>Label</label><input id="cf-label" value="'+esc(d.label||'')+'" />';
 
   if (d.type === 'task') {
+    html += '<details open><summary>General</summary><div class="details-inner">';
+    html += '<label>Label</label><input id="cf-label" value="'+esc(d.label||'')+'" />';
+    html += '</div></details>';
+    html += '<details open><summary>Prompt</summary><div class="details-inner">';
     html += '<label>Text</label><textarea id="cf-text" rows="6">'+ esc(d.text||'')+'</textarea>';
     html += '<div class="hint">Use this to define the task for the pipeline</div>';
+    html += '</div></details>';
   } else {
-    // Description for agents too
-    html += '<label>Description</label><textarea id="cf-desc" rows="3">'+ esc(d.description||'')+'</textarea>';
-
     // Projects: Architect gets multi-select, others get single dropdown
     if (!d.projectIds) d.projectIds = d.projectId ? [d.projectId] : [];
     const isArchitect = (d.label||'').toLowerCase() === 'architect';
+    const nodeLabel = (d.label||'').toLowerCase();
+
+    // General section
+    html += '<details open><summary>General</summary><div class="details-inner">';
+    html += '<label>Label</label><input id="cf-label" value="'+esc(d.label||'')+'" />';
+    html += '<label>Description</label><textarea id="cf-desc" rows="2">'+ esc(d.description||'')+'</textarea>';
     if (isArchitect) {
       html += '<label>Projects <span style="color:var(--red)">*</span></label><div id="cf-projects" class="tools-grid">';
       projects.forEach(p => {
@@ -519,44 +666,51 @@ function showConfigPanel(dfId) {
       });
       html += '</select>';
     }
+    html += '</div></details>';
 
-    // Prompt
+    // Prompt section
+    html += '<details open><summary>Prompt</summary><div class="details-inner">';
     html += '<label>Prompt</label><textarea id="cf-prompt" rows="8">'+esc(d.prompt||'')+'</textarea>';
     html += '<div class="hint">{task} {read:file} {read:alias:file} {files:path/} {review_issues} {var:name}</div>';
+    html += '</div></details>';
 
-    // Model
+    // Model section
     const MODELS = ['claude-sonnet-4-6','claude-opus-4-6','claude-haiku-4-5-20251001'];
     const curModel = d.model || '';
     const isCustom = curModel && !MODELS.includes(curModel);
+    html += '<details><summary>Model</summary><div class="details-inner">';
     html += '<label>Model</label><select id="cf-model-select">';
     MODELS.forEach(m => html += '<option value="'+m+'"'+(curModel===m?' selected':'')+'>'+m+'</option>');
     html += '<option value="__custom"'+(isCustom?' selected':'')+'>Custom...</option></select>';
     html += '<input id="cf-model-custom" value="'+esc(isCustom?curModel:'')+'" placeholder="model id" style="margin-top:4px;'+(isCustom?'':'display:none')+'" />';
+    html += '</div></details>';
 
-    // Tools
-    html += '<label>Tools</label><div class="tools-grid">';
+    // Tools section
+    html += '<details><summary>Tools</summary><div class="details-inner">';
+    html += '<div class="tools-grid">';
     ALL_TOOLS.forEach(t => {
       const checked = (d.tools||[]).includes(t) ? ' checked' : '';
       html += '<label class="tool-check"><input type="checkbox" data-tool="'+t+'"'+checked+'> '+t+'</label>';
     });
     html += '</div>';
+    html += '</div></details>';
 
-    // Output artifacts
+    // Artifacts section
     if (!d.outputArtifacts) d.outputArtifacts = [];
+    html += '<details><summary>Artifacts</summary><div class="details-inner">';
     html += '<label>Output artifacts <button id="cf-add-artifact" style="font-size:10px;padding:1px 5px">+</button></label>';
     html += '<div id="cf-artifacts"></div>';
+    html += '</div></details>';
 
-    // Temp files
+    // Advanced section
+    html += '<details><summary>Advanced</summary><div class="details-inner">';
     html += '<label>Temp files <span style="color:var(--text3);font-size:10px">(cleaned up after run)</span></label>';
     html += '<input id="cf-temp-files" value="'+esc((d.tempFiles||[]).join(', '))+'" placeholder="plan.md, review.md" />';
-
-    // Node label for conditional sections
-    const nodeLabel = (d.label||'').toLowerCase();
 
     // Interactive mode (only for architect)
     if (nodeLabel.includes('architect')) {
       const intEnabled = d.interactive ? true : false;
-      html += '<label><input type="checkbox" id="cf-interactive" style="width:auto;margin-right:4px"'+(intEnabled?' checked':'')+'/> Interactive (ask questions)</label>';
+      html += '<label style="margin-top:8px"><input type="checkbox" id="cf-interactive" style="width:auto;margin-right:4px"'+(intEnabled?' checked':'')+'/> Interactive (ask questions)</label>';
       html += '<div id="cf-interactive-config" style="margin-top:4px;'+(intEnabled?'':'display:none')+'">';
       html += '<label>Max question rounds</label><input type="number" id="cf-max-q-rounds" value="'+(d.maxQuestionRounds||3)+'" min="1" max="10" style="width:80px" />';
       html += '</div>';
@@ -566,16 +720,16 @@ function showConfigPanel(dfId) {
     // Decompose mode (only for coder/tester nodes)
     if (nodeLabel.includes('coder') || nodeLabel.includes('tester')) {
       const decEnabled = d.decompose ? true : false;
-      html += '<label><input type="checkbox" id="cf-decompose" style="width:auto;margin-right:4px"'+(decEnabled?' checked':'')+'/> Decompose subtasks</label>';
+      html += '<label style="margin-top:8px"><input type="checkbox" id="cf-decompose" style="width:auto;margin-right:4px"'+(decEnabled?' checked':'')+'/> Decompose subtasks</label>';
       html += '<div class="hint">When enabled, reads upstream architect\'s "## Subtasks" and runs each as a separate claude session. Use {subtask} in prompt.</div>';
     }
 
     // Reviewer config (only for reviewer nodes)
     if (nodeLabel.includes('review')) {
-      html += '<label>Max review rounds</label><input type="number" id="cf-max-review" value="'+(d.maxRetries||3)+'" min="1" max="10" style="width:80px" />';
+      html += '<label style="margin-top:8px">Max review rounds</label><input type="number" id="cf-max-review" value="'+(d.maxRetries||3)+'" min="1" max="10" style="width:80px" />';
       html += '<div class="hint">Reviewer auto-detects its target from upstream connection. On FAIL, target re-runs with issues. Use {review_issues} in target prompt.</div>';
     }
-
+    html += '</div></details>';
   }
 
   content.innerHTML = html;
@@ -859,6 +1013,7 @@ async function savePipeline() {
   });
   loadPipelineList();
   document.getElementById('run-status').textContent = 'saved: ' + name;
+  showToast('Saved: ' + name, 'success');
 }
 
 function downloadJSON() {
@@ -879,13 +1034,25 @@ async function loadPipelineList() {
     (data.pipelines||[]).forEach(name => {
       list.innerHTML += '<div class="pipeline-item" onclick="loadPipeline(\''+esc(name)+'\')">' +
         '<span>'+esc(name)+'</span>' +
-        '<span class="del" onclick="event.stopPropagation();deletePipeline(\''+esc(name)+'\')">x</span></div>';
+        '<span style="display:flex;gap:2px;align-items:center">' +
+        '<span class="dup" onclick="duplicatePipeline(\''+esc(name)+'\',event)" title="Duplicate">⧉</span>' +
+        '<span class="del" onclick="event.stopPropagation();deletePipeline(\''+esc(name)+'\')">x</span>' +
+        '</span></div>';
     });
+    // Re-apply filter if active
+    const q = document.getElementById('sidebar-search').value;
+    if (q) filterSidebar(q);
   } catch(_) {}
 }
 
 async function loadPipeline(name) {
   try {
+    const exp = editor.export();
+    const nodeCount = Object.keys(exp.drawflow.Home.data).length;
+    if (nodeCount > 0) {
+      const ok = await confirmDialog('Loading "' + name + '" will clear the current canvas. Continue?');
+      if (!ok) return;
+    }
     const res = await fetch('/api/pipelines/'+encodeURIComponent(name));
     const config = await res.json();
     editor.clear();
@@ -945,14 +1112,20 @@ async function loadPipeline(name) {
     });
 
     document.getElementById('run-status').textContent = 'loaded: ' + name;
+    showToast('Loaded: ' + name, 'info');
+    updateEmptyState();
   } catch(err) {
     console.error('load error', err);
+    showToast('Load error: ' + err.message, 'error');
   }
 }
 
 async function deletePipeline(name) {
+  const ok = await confirmDialog('Delete pipeline "' + name + '"? This cannot be undone.');
+  if (!ok) return;
   await fetch('/api/pipelines/'+encodeURIComponent(name), {method:'DELETE'});
   loadPipelineList();
+  showToast('Deleted: ' + name, 'warning');
 }
 
 // ── RUN ────────────────────────────────────
@@ -998,6 +1171,7 @@ async function runPipeline() {
   if (hasBlockers) {
     const msgs = errors.filter(e => e.level === 'error').map(e => e.message);
     document.getElementById('run-status').textContent = 'validation failed: ' + msgs.join('; ');
+    showToast('Validation failed: ' + msgs.join('; '), 'error');
     return;
   }
 
@@ -1024,9 +1198,11 @@ async function doRunPipeline(config) {
     document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
     document.getElementById('btn-run').className = 'btn-stop';
     document.getElementById('btn-run').onclick = stopRun;
+    showToast('Pipeline started', 'info');
     startPolling();
   } catch(err) {
     document.getElementById('run-status').textContent = 'error: ' + err.message;
+    showToast('Run error: ' + err.message, 'error');
   }
 }
 
@@ -1049,9 +1225,11 @@ async function runFromNode(nodeId, event) {
     document.getElementById('btn-run').innerHTML = '\u25A0 Stop';
     document.getElementById('btn-run').className = 'btn-stop';
     document.getElementById('btn-run').onclick = stopRun;
+    showToast('Running from: ' + nodeId, 'info');
     startPolling();
   } catch(err) {
     document.getElementById('run-status').textContent = 'error: ' + err.message;
+    showToast('Run error: ' + err.message, 'error');
   }
 }
 
@@ -1064,6 +1242,7 @@ async function stopRun() {
   document.getElementById('btn-run').className = 'btn-run';
   document.getElementById('btn-run').onclick = runPipeline;
   document.getElementById('run-status').textContent = 'stopped';
+  showToast('Run stopped', 'warning');
 }
 
 function startPolling() {
@@ -1101,13 +1280,25 @@ function applyStatuses(statuses) {
     const el = document.getElementById('ns-'+nodeId);
     if (el) {
       let cls = 's-'+s.status;
+      let icon = '';
       let text = s.status;
-      if (s.status === 'running') text += ' ' + s.elapsed + 's';
+      if (s.status === 'running') {
+        icon = '<span class="status-icon-running">⚙</span> ';
+        text = 'running ' + fmtElapsed(s.elapsed || 0);
+      } else if (s.status === 'done') {
+        icon = '<span style="color:var(--green)">✓</span> ';
+      } else if (s.status === 'error') {
+        icon = '<span style="color:var(--red)">✗</span> ';
+      } else if (s.status === 'waiting_for_input') {
+        icon = '<span style="color:var(--purple)">◉</span> ';
+      } else if (s.status === 'queued' || s.status === 'pending') {
+        icon = '<span style="color:var(--text3)">○</span> ';
+      }
       if (s.review_round) text += ' (review round ' + s.review_round + ')';
       if (s.retry_attempt) text += ' (retry ' + s.retry_attempt + ')';
       if (s.message) text += ' \u2014 ' + s.message;
       el.className = 'node-status ' + cls;
-      el.innerHTML = esc(text);
+      el.innerHTML = icon + esc(text);
       if (s.status === 'error' && currentRunId) {
         el.innerHTML += ' <button class="node-retry-btn" onclick="retryNode(\''+esc(nodeId)+'\')">Retry</button>';
       }
@@ -1194,8 +1385,10 @@ function applyStatuses(statuses) {
     const hasErrors = Object.values(statuses).some(s => s.status === 'error');
     const statusText = hasErrors ? 'done (with errors)' : 'done';
     document.getElementById('run-status').textContent = statusText;
+    showToast('Pipeline ' + statusText, hasErrors ? 'error' : 'success');
     showNotification('clor — pipeline ' + statusText,
       hasErrors ? 'Some nodes failed. Check the results.' : 'Pipeline completed successfully.');
+    loadRunHistory();
   }
 }
 
@@ -1225,7 +1418,7 @@ function showQuestionForm(nodeId, questions, round) {
   activeQuestionNodeId = nodeId + '_' + round;
 
   const logViewer = document.getElementById('log-viewer');
-  logViewer.classList.remove('hidden');
+  document.getElementById('log-area').classList.remove('hidden');
   document.getElementById('rh-logs').classList.remove('hidden');
 
   let html = '<div class="question-form">';
@@ -1268,8 +1461,10 @@ async function retryNode(nodeId) {
   try {
     await fetch('/api/run/'+currentRunId+'/retry/'+encodeURIComponent(nodeId), {method:'POST'});
     document.getElementById('run-status').textContent = 'retrying: ' + nodeId;
+    showToast('Retrying: ' + nodeId, 'info');
   } catch(err) {
     document.getElementById('run-status').textContent = 'retry error: ' + err.message;
+    showToast('Retry error: ' + err.message, 'error');
   }
 }
 
@@ -1277,9 +1472,9 @@ async function retryNode(nodeId) {
 let logEventSource = null;
 
 function toggleLogs() {
-  document.getElementById('log-viewer').classList.toggle('hidden');
+  document.getElementById('log-area').classList.toggle('hidden');
   document.getElementById('rh-logs').classList.toggle('hidden');
-  if (!document.getElementById('log-viewer').classList.contains('hidden') && selectedNodeId) {
+  if (!document.getElementById('log-area').classList.contains('hidden') && selectedNodeId) {
     loadNodeLog(selectedNodeId);
   } else {
     closeLogStream();
@@ -1308,7 +1503,9 @@ async function loadNodeLog(dfId) {
       logViewer.textContent = '';
       logEventSource.onmessage = function(e) {
         logViewer.textContent += e.data.replace(/\\n/g, '\n');
-        logViewer.scrollTop = logViewer.scrollHeight;
+        if (logFollowing) {
+          logViewer.scrollTop = logViewer.scrollHeight;
+        }
       };
       logEventSource.onerror = function() {
         closeLogStream();
@@ -1331,7 +1528,7 @@ async function fetchFullLog(nodeId) {
 }
 
 editor.on('nodeSelected', function(dfId) {
-  if (!document.getElementById('log-viewer').classList.contains('hidden')) {
+  if (!document.getElementById('log-area').classList.contains('hidden')) {
     loadNodeLog(dfId);
   }
 });
@@ -1345,6 +1542,12 @@ function importJSON() {
     const file = input.files[0];
     if (!file) return;
     try {
+      const expCheck = editor.export();
+      const nodeCount = Object.keys(expCheck.drawflow.Home.data).length;
+      if (nodeCount > 0) {
+        const ok = await confirmDialog('Importing will clear the current canvas. Continue?');
+        if (!ok) return;
+      }
       const text = await file.text();
       const config = JSON.parse(text);
       editor.clear();
@@ -1398,9 +1601,12 @@ function importJSON() {
       });
 
       document.getElementById('run-status').textContent = 'imported: ' + (config.name || file.name);
+      showToast('Imported: ' + (config.name || file.name), 'success');
+      updateEmptyState();
     } catch(err) {
       console.error('import error', err);
       document.getElementById('run-status').textContent = 'import error: ' + err.message;
+      showToast('Import error: ' + err.message, 'error');
     }
   });
   input.click();
@@ -1484,11 +1690,19 @@ document.addEventListener('keydown', e => {
       selectedNodeId = null;
       document.getElementById('config-panel').classList.add('hidden');
     }
-    document.getElementById('log-viewer').classList.add('hidden');
+    document.getElementById('log-area').classList.add('hidden');
     document.getElementById('rh-logs').classList.add('hidden');
     document.getElementById('project-modal').classList.add('hidden');
     document.getElementById('variables-modal').classList.add('hidden');
     document.getElementById('run-vars-modal').classList.add('hidden');
+    document.getElementById('confirm-modal').classList.add('hidden');
+    document.getElementById('shortcuts-modal').classList.add('hidden');
+  }
+
+  // ? or Ctrl+/ — show shortcuts
+  if ((e.key === '?' && !inInput) || (e.ctrlKey && e.key === '/')) {
+    e.preventDefault();
+    toggleShortcutsHelp();
   }
 
   // Ctrl+E — export
@@ -1537,7 +1751,7 @@ function initResize(handleId, target, dimension, min, max, direction) {
 
 initResize('rh-sidebar', document.getElementById('sidebar'), 'width', 120, 400, 'h');
 initResize('rh-config', document.getElementById('config-panel'), 'width', 200, 600, 'h');
-initResize('rh-logs', document.getElementById('log-viewer'), 'height', 80, 500, 'v');
+initResize('rh-logs', document.getElementById('log-area'), 'height', 80, 500, 'v');
 
 // ── HELPER: get all node IDs/labels ────────
 function getAllNodeIds() {
@@ -1650,6 +1864,85 @@ function redo() {
   editor.on(evt, () => saveUndoState());
 });
 
+// Update empty state on node changes
+editor.on('nodeCreated', () => updateEmptyState());
+editor.on('nodeRemoved', () => updateEmptyState());
+
+// Connection color coding and cycle detection
+editor.on('connectionCreated', function(info) {
+  const { id_output, id_input, output_class, input_class } = info;
+
+  // ── Cycle detection ──
+  const exp = editor.export().drawflow.Home.data;
+  const nodeIds = Object.keys(exp);
+  const adjList = {};
+  nodeIds.forEach(dfId => {
+    const nd = exp[dfId];
+    adjList[dfId] = [];
+    Object.keys(nd.outputs || {}).forEach(outKey => {
+      (nd.outputs[outKey].connections || []).forEach(conn => {
+        adjList[dfId].push(conn.node);
+      });
+    });
+  });
+  if (hasCycle(nodeIds, adjList)) {
+    editor.removeSingleConnection(id_output, id_input, output_class, input_class);
+    showToast('Connection would create a cycle — removed', 'warning');
+    return;
+  }
+
+  // ── Check task-to-task connection ──
+  const srcNode = editor.getNodeFromId(id_output);
+  const tgtNode = editor.getNodeFromId(id_input);
+  if (srcNode && tgtNode && srcNode.data.type === 'task' && tgtNode.data.type === 'task') {
+    editor.removeSingleConnection(id_output, id_input, output_class, input_class);
+    showToast('Cannot connect task nodes directly', 'warning');
+    return;
+  }
+
+  // ── Color coding ──
+  // Find the SVG connection element
+  setTimeout(() => {
+    // Drawflow renders connections after event fires, use small delay
+    const connections = canvasEl.querySelectorAll('.drawflow .connection');
+    connections.forEach(conn => {
+      // Remove existing color classes
+      conn.classList.remove('conn-task-agent', 'conn-agent-reviewer', 'conn-to-committer');
+    });
+    // Re-apply all connection colors
+    Object.keys(exp).forEach(dfId => {
+      const nd = exp[dfId];
+      Object.keys(nd.outputs || {}).forEach(outKey => {
+        (nd.outputs[outKey].connections || []).forEach(conn => {
+          applyConnectionColor(dfId, conn.node, outKey, conn.output);
+        });
+      });
+    });
+  }, 50);
+});
+
+function applyConnectionColor(srcDfId, tgtDfId, outClass, inClass) {
+  const srcNode = editor.getNodeFromId(srcDfId);
+  const tgtNode = editor.getNodeFromId(tgtDfId);
+  if (!srcNode || !tgtNode) return;
+
+  const srcType = srcNode.data.type;
+  const tgtLabel = (tgtNode.data.label || '').toLowerCase();
+
+  // Find the connection SVG element - Drawflow uses node-N-N pattern
+  const connEl = canvasEl.querySelector('.connection.node_in_node-' + tgtDfId + '.node_out_node-' + srcDfId);
+  if (!connEl) return;
+
+  connEl.classList.remove('conn-task-agent', 'conn-agent-reviewer', 'conn-to-committer');
+  if (srcType === 'task') {
+    connEl.classList.add('conn-task-agent');
+  } else if (tgtLabel.includes('review')) {
+    connEl.classList.add('conn-agent-reviewer');
+  } else if (tgtLabel.includes('commit')) {
+    connEl.classList.add('conn-to-committer');
+  }
+}
+
 // ── AUTO-LAYOUT ────────────────────────────
 function autoLayout() {
   const config = buildPipelineJSON();
@@ -1705,6 +1998,202 @@ function autoLayout() {
   });
 }
 
+// ── TOAST NOTIFICATIONS ────────────────────
+function showToast(message, level) {
+  level = level || 'info';
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast toast-' + level;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('fade-out');
+    setTimeout(() => toast.remove(), 400);
+  }, 4000);
+}
+
+// ── EMPTY CANVAS STATE ─────────────────────
+function updateEmptyState() {
+  const exp = editor.export();
+  const count = Object.keys(exp.drawflow.Home.data).length;
+  const el = document.getElementById('empty-state');
+  if (!el) return;
+  if (count === 0) el.classList.remove('hidden');
+  else el.classList.add('hidden');
+}
+
+// ── CONFIRM DIALOG ─────────────────────────
+function confirmDialog(message) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-msg').textContent = message;
+    modal.classList.remove('hidden');
+    function cleanup() {
+      modal.classList.add('hidden');
+      document.getElementById('confirm-ok').onclick = null;
+      document.getElementById('confirm-cancel').onclick = null;
+    }
+    document.getElementById('confirm-ok').onclick = () => { cleanup(); resolve(true); };
+    document.getElementById('confirm-cancel').onclick = () => { cleanup(); resolve(false); };
+  });
+}
+
+// ── THEME TOGGLE ───────────────────────────
+function toggleTheme() {
+  const root = document.documentElement;
+  const isLight = root.dataset.theme === 'light';
+  root.dataset.theme = isLight ? '' : 'light';
+  document.getElementById('theme-toggle').textContent = isLight ? '☀' : '🌙';
+  localStorage.setItem('clor-theme', root.dataset.theme);
+}
+
+// ── KEYBOARD SHORTCUTS HELP ────────────────
+function toggleShortcutsHelp() {
+  document.getElementById('shortcuts-modal').classList.toggle('hidden');
+}
+
+// ── FORMATTED ELAPSED TIME ─────────────────
+function fmtElapsed(seconds) {
+  if (seconds < 60) return seconds + 's';
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m + 'm ' + s + 's';
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h + 'h ' + m + 'm';
+}
+
+// ── LOG SMART AUTO-SCROLL ──────────────────
+function scrollLogToBottom() {
+  const lv = document.getElementById('log-viewer');
+  lv.scrollTop = lv.scrollHeight;
+  logFollowing = true;
+  document.getElementById('log-follow-btn').style.display = 'none';
+}
+
+// Wire scroll event on log-viewer
+document.addEventListener('DOMContentLoaded', () => {
+  const lv = document.getElementById('log-viewer');
+  if (!lv) return;
+  lv.addEventListener('scroll', () => {
+    const atBottom = lv.scrollTop + lv.clientHeight >= lv.scrollHeight - 50;
+    logFollowing = atBottom;
+    document.getElementById('log-follow-btn').style.display = atBottom ? 'none' : 'block';
+  });
+});
+
+// ── ZOOM TRACKING ──────────────────────────
+editor.on('zoom', function() {
+  const pct = Math.round((editor.zoom || 1) * 100);
+  const el = document.getElementById('zoom-pct');
+  if (el) el.textContent = pct + '%';
+});
+
+// ── SIDEBAR FILTER ─────────────────────────
+function filterSidebar(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('#pipeline-list .pipeline-item').forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
+  document.querySelectorAll('#project-list .project-row').forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
+}
+
+function clearSidebarSearch() {
+  document.getElementById('sidebar-search').value = '';
+  filterSidebar('');
+}
+
+// ── RUN HISTORY ────────────────────────────
+async function loadRunHistory() {
+  try {
+    const res = await fetch('/api/runs');
+    const data = await res.json();
+    const list = document.getElementById('run-history-list');
+    list.innerHTML = '';
+    (data.runs || []).forEach(r => {
+      const shortId = r.id.slice(0, 12);
+      const hasError = r.error_count > 0;
+      const allDone = r.node_count > 0 && r.done_count + r.error_count === r.node_count;
+      const statusText = r.node_count
+        ? (hasError ? r.done_count + '✓ ' + r.error_count + '✗' : r.done_count + '/' + r.node_count + ' done')
+        : 'empty';
+      const nameText = r.pipeline_name ? esc(r.pipeline_name) + ' · ' : '';
+      const div = document.createElement('div');
+      div.className = 'run-history-item';
+      div.innerHTML =
+        '<div class="rh-info">' +
+        '<div class="rh-id">' + nameText + shortId + '…</div>' +
+        '<div class="rh-status" style="color:' + (hasError ? 'var(--red)' : allDone ? 'var(--green)' : 'var(--text3)') + '">' + statusText + '</div>' +
+        '</div>' +
+        '<button class="rh-del" onclick="deleteRun(\'' + r.id + '\',event)" title="Delete run">×</button>';
+      list.appendChild(div);
+    });
+  } catch(_) {}
+}
+
+async function deleteRun(id, event) {
+  event.stopPropagation();
+  await fetch('/api/runs/' + encodeURIComponent(id), {method:'DELETE'});
+  loadRunHistory();
+}
+
+// ── PIPELINE DUPLICATE ─────────────────────
+async function duplicatePipeline(name, event) {
+  event.stopPropagation();
+  try {
+    const res = await fetch('/api/pipelines/' + encodeURIComponent(name));
+    const config = await res.json();
+    let newName = name + '-copy';
+    // Check for conflicts by trying a timestamp suffix if needed
+    const listRes = await fetch('/api/pipelines');
+    const listData = await listRes.json();
+    if ((listData.pipelines || []).includes(newName)) {
+      newName = name + '-copy-' + Date.now();
+    }
+    config.name = newName;
+    await fetch('/api/pipelines/' + encodeURIComponent(newName), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(config)
+    });
+    loadPipelineList();
+    showToast('Duplicated as "' + newName + '"', 'success');
+  } catch(err) {
+    showToast('Duplicate failed: ' + err.message, 'error');
+  }
+}
+
+// ── CYCLE DETECTION ────────────────────────
+function hasCycle(nodes, adjList) {
+  const visited = {};
+  const inStack = {};
+  function dfs(nodeId) {
+    visited[nodeId] = true;
+    inStack[nodeId] = true;
+    for (const neighbor of (adjList[nodeId] || [])) {
+      if (!visited[neighbor]) {
+        if (dfs(neighbor)) return true;
+      } else if (inStack[neighbor]) {
+        return true;
+      }
+    }
+    inStack[nodeId] = false;
+    return false;
+  }
+  for (const nodeId of nodes) {
+    if (!visited[nodeId]) {
+      if (dfs(nodeId)) return true;
+    }
+  }
+  return false;
+}
+
 // ── BROWSER NOTIFICATIONS ──────────────────
 let notificationsEnabled = false;
 
@@ -1726,6 +2215,14 @@ function showNotification(title, body) {
 requestNotificationPermission();
 loadProjectsFromServer();
 loadPipelineList();
+loadRunHistory();
+updateEmptyState();
+// Apply saved theme
+(function() {
+  const saved = localStorage.getItem('clor-theme') || '';
+  document.documentElement.dataset.theme = saved;
+  document.getElementById('theme-toggle').textContent = saved === 'light' ? '🌙' : '☀';
+})();
 </script>
 </body>
 </html>
