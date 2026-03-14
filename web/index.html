@@ -188,6 +188,22 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 #confirm-modal .btn-confirm{background:var(--red)22;color:var(--red);border-color:var(--red)44}
 #confirm-modal .btn-confirm:hover{background:var(--red)33}
 
+/* ── Run Detail Modal ── */
+#run-detail-modal .modal-body{min-width:520px;max-width:720px}
+#run-detail-modal .rd-header{margin-bottom:12px}
+#run-detail-modal .rd-title{font-size:14px;font-weight:600;margin-bottom:4px}
+#run-detail-modal .rd-meta{font-size:11px;color:var(--text3);font-family:var(--mono)}
+#run-detail-modal .rd-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+#run-detail-modal .rd-table th{text-align:left;color:var(--text3);font-weight:500;padding:4px 6px;border-bottom:1px solid var(--border)}
+#run-detail-modal .rd-table td{padding:5px 6px;border-bottom:1px solid var(--border)55;vertical-align:top}
+#run-detail-modal .rd-table tr:last-child td{border-bottom:none}
+#run-detail-modal .rd-node-name{font-family:var(--mono);color:var(--text2)}
+#run-detail-modal .rd-log-area{margin-top:8px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;padding:8px;max-height:240px;overflow-y:auto}
+#run-detail-modal .rd-log-area pre{font-size:10px;font-family:var(--mono);white-space:pre-wrap;word-break:break-all;margin:0;color:var(--text2)}
+#run-detail-modal .btn-view-log{font-size:10px;padding:2px 6px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text2)}
+#run-detail-modal .btn-view-log:hover{background:var(--bg1);color:var(--text1)}
+.run-history-item{cursor:pointer}
+
 /* ── Connection color coding ── */
 .drawflow .conn-task-agent .main-path{stroke:var(--green)}
 .drawflow .conn-agent-reviewer .main-path{stroke:var(--purple)}
@@ -343,6 +359,19 @@ kbd{background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padd
   </div>
 </div>
 
+<div id="run-detail-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeRunDetailModal()">
+  <div class="modal-body">
+    <div class="rd-header">
+      <div class="rd-title" id="rd-title">Run details</div>
+      <div class="rd-meta" id="rd-meta"></div>
+    </div>
+    <div id="rd-body"></div>
+    <div class="modal-actions">
+      <button onclick="closeRunDetailModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="shortcuts-modal" class="modal-overlay hidden" onclick="if(event.target===this)toggleShortcutsHelp()">
   <div class="modal-body">
     <h3>Keyboard Shortcuts</h3>
@@ -461,8 +490,7 @@ async function deleteNodeBtn(nodeId, event) {
   const ok = await confirmDialog('Delete this node?');
   if (!ok) return;
   // Find drawflow ID from nodeId
-  const exp = editor.export();
-  const mod = exp.drawflow.Home.data;
+  const mod = getEditorData();
   for (const dfId of Object.keys(mod)) {
     if (mod[dfId].data && mod[dfId].data.nodeId === nodeId) {
       editor.removeNodeId('node-'+dfId);
@@ -519,7 +547,7 @@ editor.on('nodeMoved', function(dfId) {
 
   let snapX = null, snapY = null;
 
-  const exp = editor.export().drawflow.Home.data;
+  const exp = getEditorData();
   Object.keys(exp).forEach(otherId => {
     if (otherId == dfId) return;
     const other = exp[otherId];
@@ -617,9 +645,13 @@ editor.on('nodeUnselected', function() {
   document.getElementById('config-panel').classList.add('hidden');
 });
 
+function getEditorData() {
+  return editor.export()?.drawflow?.Home?.data || {};
+}
+
 function getNodeDataDirect(dfId) {
   // Access internal Drawflow data directly (not a copy)
-  return editor.drawflow.drawflow.Home.data[dfId];
+  return editor.drawflow?.drawflow?.Home?.data?.[dfId];
 }
 
 function showConfigPanel(dfId) {
@@ -949,8 +981,7 @@ async function saveProjects() {
 
 // ── PIPELINE SAVE / LOAD ───────────────────
 function buildPipelineJSON() {
-  const exportData = editor.export();
-  const module = exportData.drawflow.Home.data;
+  const module = getEditorData();
   const nodes = [];
   const edges = [];
 
@@ -1047,8 +1078,7 @@ async function loadPipelineList() {
 
 async function loadPipeline(name) {
   try {
-    const exp = editor.export();
-    const nodeCount = Object.keys(exp.drawflow.Home.data).length;
+    const nodeCount = Object.keys(getEditorData()).length;
     if (nodeCount > 0) {
       const ok = await confirmDialog('Loading "' + name + '" will clear the current canvas. Continue?');
       if (!ok) return;
@@ -1402,8 +1432,7 @@ async function pollStatus() {
 }
 
 function getDfIdByNodeId(nodeId) {
-  const exp = editor.export();
-  const mod = exp.drawflow.Home.data;
+  const mod = getEditorData();
   for (const dfId of Object.keys(mod)) {
     if (mod[dfId].data && mod[dfId].data.nodeId === nodeId) return dfId;
   }
@@ -1542,8 +1571,7 @@ function importJSON() {
     const file = input.files[0];
     if (!file) return;
     try {
-      const expCheck = editor.export();
-      const nodeCount = Object.keys(expCheck.drawflow.Home.data).length;
+      const nodeCount = Object.keys(getEditorData()).length;
       if (nodeCount > 0) {
         const ok = await confirmDialog('Importing will clear the current canvas. Continue?');
         if (!ok) return;
@@ -1618,8 +1646,7 @@ function highlightProject(projectId) {
     el.style.opacity = '1';
   });
   if (!projectId) return;
-  const exp = editor.export();
-  const mod = exp.drawflow.Home.data;
+  const mod = getEditorData();
   Object.keys(mod).forEach(dfId => {
     const d = mod[dfId].data;
     const el = canvasEl.querySelector('#node-'+dfId);
@@ -1697,6 +1724,7 @@ document.addEventListener('keydown', e => {
     document.getElementById('run-vars-modal').classList.add('hidden');
     document.getElementById('confirm-modal').classList.add('hidden');
     document.getElementById('shortcuts-modal').classList.add('hidden');
+    document.getElementById('run-detail-modal').classList.add('hidden');
   }
 
   // ? or Ctrl+/ — show shortcuts
@@ -1755,8 +1783,7 @@ initResize('rh-logs', document.getElementById('log-area'), 'height', 80, 500, 'v
 
 // ── HELPER: get all node IDs/labels ────────
 function getAllNodeIds() {
-  const exp = editor.export();
-  const mod = exp.drawflow.Home.data;
+  const mod = getEditorData();
   return Object.keys(mod).map(dfId => ({
     nodeId: mod[dfId].data.nodeId,
     label: mod[dfId].data.label || mod[dfId].data.nodeId
@@ -1873,7 +1900,7 @@ editor.on('connectionCreated', function(info) {
   const { id_output, id_input, output_class, input_class } = info;
 
   // ── Cycle detection ──
-  const exp = editor.export().drawflow.Home.data;
+  const exp = getEditorData();
   const nodeIds = Object.keys(exp);
   const adjList = {};
   nodeIds.forEach(dfId => {
@@ -1990,7 +2017,7 @@ function autoLayout() {
       if (el) {
         el.style.left = x + 'px';
         el.style.top = y + 'px';
-        const info = editor.drawflow.drawflow.Home.data[dfId];
+        const info = getNodeDataDirect(dfId);
         if (info) { info.pos_x = x; info.pos_y = y; }
         editor.updateConnectionNodes('node-'+dfId);
       }
@@ -2014,8 +2041,7 @@ function showToast(message, level) {
 
 // ── EMPTY CANVAS STATE ─────────────────────
 function updateEmptyState() {
-  const exp = editor.export();
-  const count = Object.keys(exp.drawflow.Home.data).length;
+  const count = Object.keys(getEditorData()).length;
   const el = document.getElementById('empty-state');
   if (!el) return;
   if (count === 0) el.classList.remove('hidden');
@@ -2132,6 +2158,7 @@ async function loadRunHistory() {
         '<div class="rh-status" style="color:' + (hasError ? 'var(--red)' : allDone ? 'var(--green)' : 'var(--text3)') + '">' + statusText + '</div>' +
         '</div>' +
         '<button class="rh-del" onclick="deleteRun(\'' + r.id + '\',event)" title="Delete run">×</button>';
+      div.addEventListener('click', () => showRunDetail(r));
       list.appendChild(div);
     });
   } catch(_) {}
@@ -2141,6 +2168,76 @@ async function deleteRun(id, event) {
   event.stopPropagation();
   await fetch('/api/runs/' + encodeURIComponent(id), {method:'DELETE'});
   loadRunHistory();
+}
+
+// ── RUN DETAIL MODAL ────────────────────────
+async function showRunDetail(r) {
+  const modal = document.getElementById('run-detail-modal');
+  const title = document.getElementById('rd-title');
+  const meta = document.getElementById('rd-meta');
+  const body = document.getElementById('rd-body');
+
+  const name = r.pipeline_name ? esc(r.pipeline_name) : '(unnamed)';
+  title.textContent = name;
+  meta.textContent = r.id + (r.started_at ? '  ·  ' + new Date(r.started_at).toLocaleString() : '');
+  body.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  modal.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/run/' + encodeURIComponent(r.id) + '/status');
+    if (!res.ok) throw new Error('status ' + res.status);
+    const statuses = await res.json(); // map nodeId -> NodeStatus
+
+    if (!statuses || Object.keys(statuses).length === 0) {
+      body.innerHTML = '<div style="color:var(--text3);font-size:12px">No node data available.</div>';
+      return;
+    }
+
+    let html = '<table class="rd-table"><thead><tr><th>Node</th><th>Status</th><th>Elapsed</th><th>Message</th><th></th></tr></thead><tbody>';
+    for (const [nodeId, ns] of Object.entries(statuses)) {
+      const statusColor = ns.status === 'done' ? 'var(--green)' : ns.status === 'error' ? 'var(--red)' : ns.status === 'running' ? 'var(--yellow)' : 'var(--text3)';
+      const elapsed = ns.elapsed_ms ? (ns.elapsed_ms / 1000).toFixed(1) + 's' : '—';
+      const msg = ns.message ? esc(ns.message).slice(0, 80) + (ns.message.length > 80 ? '…' : '') : '';
+      html += '<tr>' +
+        '<td class="rd-node-name">' + esc(nodeId) + '</td>' +
+        '<td style="color:' + statusColor + ';font-weight:500">' + esc(ns.status || '—') + '</td>' +
+        '<td style="color:var(--text3)">' + elapsed + '</td>' +
+        '<td style="color:var(--text3)">' + msg + '</td>' +
+        '<td><button class="btn-view-log" onclick="showRunNodeLog(\'' + esc(r.id) + '\',\'' + esc(nodeId) + '\',this)">Log</button></td>' +
+        '</tr>' +
+        '<tr id="log-row-' + esc(nodeId) + '" style="display:none"><td colspan="5"><div class="rd-log-area"><pre>Loading…</pre></div></td></tr>';
+    }
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  } catch(err) {
+    body.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load: ' + esc(err.message) + '</div>';
+  }
+}
+
+async function showRunNodeLog(runId, nodeId, btn) {
+  const rowId = 'log-row-' + nodeId;
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  if (row.style.display !== 'none') {
+    row.style.display = 'none';
+    btn.textContent = 'Log';
+    return;
+  }
+  row.style.display = '';
+  btn.textContent = 'Hide';
+  const pre = row.querySelector('pre');
+  try {
+    const res = await fetch('/api/run/' + encodeURIComponent(runId) + '/logs/' + encodeURIComponent(nodeId));
+    if (!res.ok) throw new Error('status ' + res.status);
+    const text = await res.text();
+    pre.textContent = text || '(empty)';
+  } catch(err) {
+    pre.textContent = 'Error: ' + err.message;
+  }
+}
+
+function closeRunDetailModal() {
+  document.getElementById('run-detail-modal').classList.add('hidden');
 }
 
 // ── PIPELINE DUPLICATE ─────────────────────
