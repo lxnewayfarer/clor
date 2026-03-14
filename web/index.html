@@ -498,6 +498,10 @@ function showConfigPanel(dfId) {
     html += '<label>Output artifacts <button id="cf-add-artifact" style="font-size:10px;padding:1px 5px">+</button></label>';
     html += '<div id="cf-artifacts"></div>';
 
+    // Temp files
+    html += '<label>Temp files <span style="color:var(--text3);font-size:10px">(cleaned up after run)</span></label>';
+    html += '<input id="cf-temp-files" value="'+esc((d.tempFiles||[]).join(', '))+'" placeholder="plan.md, review.md" />';
+
     // Interactive mode
     const intEnabled = d.interactive ? true : false;
     html += '<label><input type="checkbox" id="cf-interactive" style="width:auto;margin-right:4px"'+(intEnabled?' checked':'')+'/> Interactive (ask questions)</label>';
@@ -577,6 +581,11 @@ function showConfigPanel(dfId) {
   }
   if (modelCustom) modelCustom.addEventListener('input', () => {
     info.data.model = modelCustom.value;
+  });
+
+  const tempFilesInput = document.getElementById('cf-temp-files');
+  if (tempFilesInput) tempFilesInput.addEventListener('input', () => {
+    info.data.tempFiles = tempFilesInput.value.split(',').map(s => s.trim()).filter(Boolean);
   });
 
   content.querySelectorAll('[data-tool]').forEach(cb => {
@@ -722,6 +731,7 @@ function buildPipelineJSON() {
       allowed_tools: d.tools || [],
       model: d.model || '',
       output_artifacts: (d.outputArtifacts || []).filter(a => a.file),
+      temp_files: (d.tempFiles || []).filter(Boolean),
       interactive: d.interactive || false,
       max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
     };
@@ -812,6 +822,7 @@ async function loadPipeline(name) {
         text: n.config.text || '',
         model: n.config.model || n.config.model_override || '',
         outputArtifacts: n.config.output_artifacts || [],
+        tempFiles: n.config.temp_files || [],
         interactive: n.config.interactive || false,
         maxQuestionRounds: n.config.max_question_rounds || 3,
         projectId: pIds[0] || '',
@@ -1083,6 +1094,7 @@ function importJSON() {
           text: n.config.text || '',
           model: n.config.model || n.config.model_override || '',
           outputArtifacts: n.config.output_artifacts || [],
+          tempFiles: n.config.temp_files || [],
           interactive: n.config.interactive || false,
           maxQuestionRounds: n.config.max_question_rounds || 3,
           projectId: pIds[0] || '',

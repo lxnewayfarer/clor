@@ -47,6 +47,7 @@ type NodeDetail struct {
 	AllowedTools      []string         `json:"allowed_tools,omitempty"`
 	Model             string           `json:"model,omitempty"`
 	OutputArtifacts   []OutputArtifact `json:"output_artifacts,omitempty"`
+	TempFiles         []string         `json:"temp_files,omitempty"`
 	Interactive       bool             `json:"interactive,omitempty"`
 	MaxQuestionRounds int              `json:"max_question_rounds,omitempty"`
 }

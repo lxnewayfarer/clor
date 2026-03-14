@@ -88,9 +88,11 @@ func (o *Orchestrator) Run(ctx context.Context) {
 		wg.Wait()
 
 		if ctx.Err() != nil {
-			return
+			break
 		}
 	}
+
+	o.cleanupTempFiles()
 }
 
 func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
@@ -213,6 +215,22 @@ func (o *Orchestrator) SubmitAnswer(nodeID string, answers []Question) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (o *Orchestrator) cleanupTempFiles() {
+	for _, node := range o.config.Nodes {
+		if len(node.Config.TempFiles) == 0 {
+			continue
+		}
+		proj, ok := o.projects[node.Config.ProjectID]
+		if !ok {
+			continue
+		}
+		for _, f := range node.Config.TempFiles {
+			path := filepath.Join(proj.Path, f)
+			os.Remove(path)
+		}
 	}
 }
 
