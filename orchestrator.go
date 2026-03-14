@@ -113,6 +113,10 @@ func (o *Orchestrator) executeNode(ctx context.Context, nodeID string) {
 		return
 	}
 
+	if isCommitterNode(node) {
+		o.cleanupTempFiles()
+	}
+
 	proj, ok := o.projects[node.Config.ProjectID]
 	workdir := "."
 	if ok {
@@ -343,6 +347,12 @@ func (o *Orchestrator) executeDecomposed(ctx context.Context, nodeID string, nod
 func isReviewerNode(n NodeConfig) bool {
 	label := strings.ToLower(n.Label)
 	return strings.Contains(label, "review")
+}
+
+// isCommitterNode checks if a node is a committer by its label.
+func isCommitterNode(n NodeConfig) bool {
+	label := strings.ToLower(n.Label)
+	return strings.Contains(label, "commit")
 }
 
 // getUpstreamNodeID returns the first upstream node ID for a given node.
