@@ -809,6 +809,7 @@ function buildPipelineJSON() {
       id: d.nodeId,
       type: d.type,
       label: d.label || '',
+      icon: d.icon || '',
       pos: {x: n.pos_x, y: n.pos_y},
       config: cfg
     });
@@ -885,7 +886,7 @@ async function loadPipeline(name) {
       const proj = projects.find(p => p.id === (pIds[0] || ''));
       const data = {
         type: n.type,
-        icon: n.type==='task'?'\u{1F4CC}':'\u{1F4BB}',
+        icon: n.icon || (n.type==='task'?'\u{1F4CC}':'\u{1F4BB}'),
         label: n.label,
         tools: n.config.allowed_tools || [],
         prompt: n.config.prompt || '',
@@ -1130,7 +1131,7 @@ function applyStatuses(statuses) {
     if (s.status === 'waiting_for_input' && s.questions && s.questions.length > 0) {
       waitingNode = {nodeId, questions: s.questions, round: s.question_round};
     }
-    if (s.status !== 'done' && s.status !== 'error' && s.status !== 'idle') allDone = false;
+    if (s.status !== 'done' && s.status !== 'error') allDone = false;
   });
 
   if (waitingNode) {
@@ -1310,7 +1311,7 @@ function importJSON() {
         const proj = projects.find(p => p.id === (pIds[0] || ''));
         const data = {
           type: n.type,
-          icon: n.type==='task'?'\u{1F4CC}':'\u{1F4BB}',
+          icon: n.icon || (n.type==='task'?'\u{1F4CC}':'\u{1F4BB}'),
           label: n.label,
           tools: n.config.allowed_tools || [],
           prompt: n.config.prompt || '',
