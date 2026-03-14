@@ -2,13 +2,17 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 
 func configDir() string {
 	home, _ := os.UserHomeDir()
@@ -40,11 +44,17 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /api/pipelines/{name}", handleSavePipeline)
 	mux.HandleFunc("DELETE /api/pipelines/{name}", handleDeletePipeline)
 
+	// Validation
+	mux.HandleFunc("POST /api/validate", handleValidate)
+
 	// Runs
 	mux.HandleFunc("POST /api/run", handleStartRun)
 	mux.HandleFunc("GET /api/run/{id}/status", handleRunStatus)
+	mux.HandleFunc("GET /api/run/{id}/events", handleRunEvents)
 	mux.HandleFunc("POST /api/run/{id}/stop", handleStopRun)
 	mux.HandleFunc("GET /api/run/{id}/logs/{nodeId}", handleNodeLog)
+	mux.HandleFunc("GET /api/run/{id}/logs/{nodeId}/stream", handleNodeLogStream)
+	mux.HandleFunc("POST /api/run/{id}/retry/{nodeId}", handleRetryNode)
 	mux.HandleFunc("POST /api/run/{id}/answer/{nodeId}", handleSubmitAnswer)
 
 	return mux
@@ -99,6 +109,10 @@ func handleSaveProjects(w http.ResponseWriter, r *http.Request) {
 
 func handleGetClaudeMD(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !safeNameRe.MatchString(id) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
 	pf := loadProjects()
 	for _, p := range pf.Projects {
 		if p.ID == id {
@@ -136,6 +150,10 @@ func handleListPipelines(w http.ResponseWriter, r *http.Request) {
 
 func handleGetPipeline(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if !safeNameRe.MatchString(name) {
+		http.Error(w, "invalid name", 400)
+		return
+	}
 	data, err := os.ReadFile(filepath.Join(pipelinesDir(), name+".json"))
 	if err != nil {
 		http.NotFound(w, r)
@@ -147,6 +165,10 @@ func handleGetPipeline(w http.ResponseWriter, r *http.Request) {
 
 func handleSavePipeline(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if !safeNameRe.MatchString(name) {
+		http.Error(w, "invalid name", 400)
+		return
+	}
 	data, _ := io.ReadAll(r.Body)
 	os.WriteFile(filepath.Join(pipelinesDir(), name+".json"), data, 0644)
 	w.Header().Set("Content-Type", "application/json")
@@ -155,9 +177,24 @@ func handleSavePipeline(w http.ResponseWriter, r *http.Request) {
 
 func handleDeletePipeline(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
+	if !safeNameRe.MatchString(name) {
+		http.Error(w, "invalid name", 400)
+		return
+	}
 	os.Remove(filepath.Join(pipelinesDir(), name+".json"))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Validation ─────────────────────────────
+
+func handleValidate(w http.ResponseWriter, r *http.Request) {
+	var config PipelineConfig
+	json.NewDecoder(r.Body).Decode(&config)
+	pf := loadProjects()
+	errs := ValidatePipeline(config, pf.Projects)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"errors": errs})
 }
 
 // ── Runs ────────────────────────────────────
@@ -189,6 +226,10 @@ func handleStartRun(w http.ResponseWriter, r *http.Request) {
 
 func handleRunStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !safeNameRe.MatchString(id) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
 	path := filepath.Join(configDir(), "runs", id, "status.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -215,8 +256,62 @@ func handleRunStatus(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+func handleRunEvents(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !safeNameRe.MatchString(id) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	rh, ok := activeRuns[id]
+	if !ok {
+		http.Error(w, "run not found", 404)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := rh.Orch.Subscribe()
+	defer rh.Orch.Unsubscribe(ch)
+
+	ctx := r.Context()
+	for {
+		select {
+		case statuses, open := <-ch:
+			if !open {
+				return
+			}
+			// Update elapsed for running nodes
+			now := float64(time.Now().Unix())
+			for k, s := range statuses {
+				if s.Status == "running" && s.StartedAt > 0 {
+					s.Elapsed = int(now - s.StartedAt)
+					statuses[k] = s
+				}
+			}
+			data, _ := json.Marshal(statuses)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 func handleStopRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !safeNameRe.MatchString(id) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
 	if rh, ok := activeRuns[id]; ok {
 		rh.Cancel()
 	}
@@ -227,6 +322,10 @@ func handleStopRun(w http.ResponseWriter, r *http.Request) {
 func handleNodeLog(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	nodeId := r.PathValue("nodeId")
+	if !safeNameRe.MatchString(id) || !safeNameRe.MatchString(nodeId) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
 	path := filepath.Join(configDir(), "runs", id, "logs", nodeId+".log")
 	logContent, err := os.ReadFile(path)
 	if err != nil {
@@ -234,6 +333,75 @@ func handleNodeLog(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"log": string(logContent)})
+}
+
+func handleNodeLogStream(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	nodeId := r.PathValue("nodeId")
+	if !safeNameRe.MatchString(id) || !safeNameRe.MatchString(nodeId) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	rh, ok := activeRuns[id]
+	if !ok {
+		http.Error(w, "run not found", 404)
+		return
+	}
+
+	logStream := rh.Orch.GetLogStream(nodeId)
+	if logStream == nil {
+		http.Error(w, "no active stream for this node", 404)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := logStream.Subscribe()
+	defer logStream.Unsubscribe(ch)
+
+	ctx := r.Context()
+	for {
+		select {
+		case chunk, open := <-ch:
+			if !open {
+				return
+			}
+			// Escape newlines for SSE
+			escaped := strings.ReplaceAll(chunk, "\n", "\\n")
+			fmt.Fprintf(w, "data: %s\n\n", escaped)
+			flusher.Flush()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleRetryNode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	nodeId := r.PathValue("nodeId")
+	if !safeNameRe.MatchString(id) || !safeNameRe.MatchString(nodeId) {
+		http.Error(w, "invalid id", 400)
+		return
+	}
+
+	rh, ok := activeRuns[id]
+	if !ok {
+		http.Error(w, "run not found", 404)
+		return
+	}
+
+	go rh.Orch.RetryNode(nodeId)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func handleSubmitAnswer(w http.ResponseWriter, r *http.Request) {

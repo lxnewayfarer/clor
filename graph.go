@@ -1,5 +1,10 @@
 package main
 
+import (
+	"fmt"
+	"strings"
+)
+
 // FilterDownstream returns the subgraph reachable from startID (inclusive).
 // Upstream task nodes are included since they are needed for prompt expansion.
 func FilterDownstream(nodes []NodeConfig, edges []Edge, startID string) ([]NodeConfig, []Edge) {
@@ -45,8 +50,8 @@ func FilterDownstream(nodes []NodeConfig, edges []Edge, startID string) ([]NodeC
 }
 
 // ComputeWaves does topological sort and groups independent nodes
-// into waves for parallel execution.
-func ComputeWaves(nodes []NodeConfig, edges []Edge) [][]string {
+// into waves for parallel execution. Returns an error if a cycle is detected.
+func ComputeWaves(nodes []NodeConfig, edges []Edge) ([][]string, error) {
 	ids := make([]string, len(nodes))
 	for i, n := range nodes {
 		ids[i] = n.ID
@@ -84,12 +89,19 @@ func ComputeWaves(nodes []NodeConfig, edges []Edge) [][]string {
 			}
 		}
 		if len(wave) == 0 {
-			break // cycle detected
+			// Collect nodes in cycle
+			var cycleNodes []string
+			for _, id := range ids {
+				if !done[id] {
+					cycleNodes = append(cycleNodes, id)
+				}
+			}
+			return waves, fmt.Errorf("cycle detected involving nodes: %s", strings.Join(cycleNodes, ", "))
 		}
 		waves = append(waves, wave)
 		for _, id := range wave {
 			done[id] = true
 		}
 	}
-	return waves
+	return waves, nil
 }

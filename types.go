@@ -21,9 +21,17 @@ type PipelineConfig struct {
 	Version   int              `json:"version"`
 	Name      string           `json:"name"`
 	Settings  PipelineSettings `json:"settings"`
+	Variables []Variable       `json:"variables,omitempty"`
+	VarValues map[string]string `json:"var_values,omitempty"`
 	Nodes     []NodeConfig     `json:"nodes"`
 	Edges     []Edge           `json:"edges"`
 	StartFrom string           `json:"start_from,omitempty"`
+}
+
+type Variable struct {
+	Name        string `json:"name"`
+	Default     string `json:"default,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type PipelineSettings struct {
@@ -50,6 +58,9 @@ type NodeDetail struct {
 	TempFiles         []string         `json:"temp_files,omitempty"`
 	Interactive       bool             `json:"interactive,omitempty"`
 	MaxQuestionRounds int              `json:"max_question_rounds,omitempty"`
+	MaxRetries        int              `json:"max_retries,omitempty"`
+	RetryDelaySeconds int              `json:"retry_delay_seconds,omitempty"`
+	ReviewerFor       string           `json:"reviewer_for,omitempty"`
 }
 
 type OutputArtifact struct {
@@ -79,4 +90,6 @@ type NodeStatus struct {
 	Elapsed       int        `json:"elapsed"`
 	Questions     []Question `json:"questions,omitempty"`
 	QuestionRound int        `json:"question_round,omitempty"`
+	RetryAttempt  int        `json:"retry_attempt,omitempty"`
+	ReviewRound   int        `json:"review_round,omitempty"`
 }

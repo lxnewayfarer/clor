@@ -123,6 +123,13 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .artifact-row{display:flex;gap:4px;align-items:center;margin-bottom:4px;font-size:12px}
 .artifact-row input{flex:1}
 .artifact-row select{width:120px}
+.node-retry-btn{background:var(--amber)22;color:var(--amber);border-color:var(--amber)44;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer}
+.node-retry-btn:hover{background:var(--amber)33}
+.var-row{display:flex;gap:4px;align-items:center;margin-bottom:4px;font-size:12px}
+.var-row input{flex:1}
+.var-row button{flex-shrink:0}
+.auto-layout-btn{background:var(--accent)22;color:var(--accent);border-color:var(--accent)44}
+.auto-layout-btn:hover{background:var(--accent)33}
 </style>
 </head>
 <body>
@@ -135,6 +142,8 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
   <button onclick="savePipeline()">Save</button>
   <button onclick="downloadJSON()">Export</button>
   <button onclick="importJSON()">Import</button>
+  <button class="auto-layout-btn" onclick="autoLayout()" title="Auto-arrange nodes by wave order">Layout</button>
+  <button onclick="openVariablesModal()" title="Pipeline variables">Vars</button>
   <button class="btn-run" onclick="runPipeline()" id="btn-run">&#9654; Run</button>
 </header>
 
@@ -175,6 +184,30 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
   </div>
 </div>
 
+<div id="variables-modal" class="modal-overlay hidden">
+  <div class="modal-body">
+    <h3>Pipeline Variables</h3>
+    <div class="hint" style="margin-bottom:8px">Define variables that can be used in prompts as {var:name}. Values are set when running the pipeline.</div>
+    <div id="modal-var-list"></div>
+    <button onclick="addVariableRow()">+ Add variable</button>
+    <div class="modal-actions">
+      <button onclick="saveVariables()">Save</button>
+      <button onclick="closeVariablesModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="run-vars-modal" class="modal-overlay hidden">
+  <div class="modal-body">
+    <h3>Set Variable Values</h3>
+    <div id="modal-run-vars"></div>
+    <div class="modal-actions">
+      <button onclick="confirmRunWithVars()">Run</button>
+      <button onclick="closeRunVarsModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
 <script>
 // ── STATE ──────────────────────────────────
@@ -183,6 +216,11 @@ let nodeCounter = 0;
 let selectedNodeId = null;
 let currentRunId = null;
 let pollTimer = null;
+let eventSource = null;
+let pipelineVariables = [];
+let undoStack = [];
+let redoStack = [];
+const MAX_UNDO = 50;
 
 const PRESETS = [
   {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],prompt:'You are a system architect. Analyze {task} and create an implementation plan in plan.md.'},
@@ -474,7 +512,7 @@ function showConfigPanel(dfId) {
 
     // Prompt
     html += '<label>Prompt</label><textarea id="cf-prompt" rows="8">'+esc(d.prompt||'')+'</textarea>';
-    html += '<div class="hint">{task} {read:file} {read:alias:file} {files:path/} {review_issues}</div>';
+    html += '<div class="hint">{task} {read:file} {read:alias:file} {files:path/} {review_issues} {var:name}</div>';
 
     // Model
     const MODELS = ['claude-sonnet-4-6','claude-opus-4-6','claude-haiku-4-5-20251001'];
@@ -509,6 +547,21 @@ function showConfigPanel(dfId) {
     html += '<label>Max question rounds</label><input type="number" id="cf-max-q-rounds" value="'+(d.maxQuestionRounds||3)+'" min="1" max="10" style="width:80px" />';
     html += '</div>';
     html += '<div class="hint">When enabled, if the agent outputs a "## Questions" section, execution pauses and you can answer before it continues.</div>';
+
+    // Reviewer config
+    html += '<label>Reviewer for (target node)</label><select id="cf-reviewer-for">';
+    html += '<option value="">— none (not a reviewer) —</option>';
+    const allNodes = getAllNodeIds();
+    allNodes.forEach(n => {
+      if (n.nodeId === d.nodeId) return;
+      const sel = (d.reviewerFor === n.nodeId) ? ' selected' : '';
+      html += '<option value="'+n.nodeId+'"'+sel+'>'+esc(n.label || n.nodeId)+'</option>';
+    });
+    html += '</select>';
+    html += '<div id="cf-reviewer-config" style="margin-top:4px;'+(d.reviewerFor?'':'display:none')+'">';
+    html += '<label>Max review rounds</label><input type="number" id="cf-max-review" value="'+(d.maxRetries||3)+'" min="1" max="10" style="width:80px" />';
+    html += '</div>';
+    html += '<div class="hint">If set, this node acts as a reviewer. On FAIL, target node re-runs with issues. Use {review_issues} in target prompt.</div>';
 
   }
 
@@ -655,6 +708,21 @@ function showConfigPanel(dfId) {
     });
   }
 
+  const reviewerFor = document.getElementById('cf-reviewer-for');
+  if (reviewerFor) {
+    reviewerFor.addEventListener('change', () => {
+      info.data.reviewerFor = reviewerFor.value;
+      const cfg = document.getElementById('cf-reviewer-config');
+      if (cfg) cfg.style.display = reviewerFor.value ? '' : 'none';
+    });
+  }
+  const maxReview = document.getElementById('cf-max-review');
+  if (maxReview) {
+    maxReview.addEventListener('input', () => {
+      info.data.maxRetries = parseInt(maxReview.value) || 3;
+    });
+  }
+
 }
 
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -734,6 +802,9 @@ function buildPipelineJSON() {
       temp_files: (d.tempFiles || []).filter(Boolean),
       interactive: d.interactive || false,
       max_question_rounds: d.interactive ? (d.maxQuestionRounds || 3) : 0,
+      max_retries: d.maxRetries || 0,
+      retry_delay_seconds: d.retryDelaySeconds || 0,
+      reviewer_for: d.reviewerFor || '',
     };
     if (d.type === 'task') cfg.text = d.text || '';
     nodes.push({
@@ -759,6 +830,7 @@ function buildPipelineJSON() {
     version: 1,
     name: document.getElementById('pipeline-name').value || 'untitled',
     settings: {model:'', timeout_seconds:600},
+    variables: pipelineVariables.filter(v => v.name.trim()),
     nodes,
     edges
   };
@@ -806,6 +878,7 @@ async function loadPipeline(name) {
     editor.clear();
     nodeCounter = 0;
     document.getElementById('pipeline-name').value = config.name || name;
+    pipelineVariables = config.variables || [];
 
     const idToDF = {};
     (config.nodes||[]).forEach(n => {
@@ -825,6 +898,9 @@ async function loadPipeline(name) {
         tempFiles: n.config.temp_files || [],
         interactive: n.config.interactive || false,
         maxQuestionRounds: n.config.max_question_rounds || 3,
+        maxRetries: n.config.max_retries || 0,
+        retryDelaySeconds: n.config.retry_delay_seconds || 0,
+        reviewerFor: n.config.reviewer_for || '',
         projectId: pIds[0] || '',
         projectIds: pIds,
         nodeId: n.id,
@@ -866,10 +942,61 @@ async function deletePipeline(name) {
 }
 
 // ── RUN ────────────────────────────────────
+async function validatePipeline(config) {
+  try {
+    const res = await fetch('/api/validate', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    return data.errors || [];
+  } catch(_) { return []; }
+}
+
+function showValidationErrors(errors) {
+  // Clear previous validation markers
+  canvasEl.querySelectorAll('.node-inner').forEach(el => {
+    el.style.boxShadow = '';
+    el.title = '';
+  });
+
+  errors.forEach(err => {
+    if (!err.node_id) return;
+    const dfId = getDfIdByNodeId(err.node_id);
+    if (!dfId) return;
+    const el = canvasEl.querySelector('#node-'+dfId+' .node-inner');
+    if (!el) return;
+    const color = err.level === 'error' ? 'var(--red)' : err.level === 'warning' ? 'var(--amber)' : 'var(--text3)';
+    el.style.boxShadow = 'inset 0 0 0 2px ' + color;
+    el.title = (el.title ? el.title + '\n' : '') + '[' + err.level + '] ' + err.message;
+  });
+}
+
 async function runPipeline() {
   const config = buildPipelineJSON();
   if (!config.nodes.length) return;
 
+  // Validate first
+  const errors = await validatePipeline(config);
+  showValidationErrors(errors);
+  const hasBlockers = errors.some(e => e.level === 'error');
+  if (hasBlockers) {
+    const msgs = errors.filter(e => e.level === 'error').map(e => e.message);
+    document.getElementById('run-status').textContent = 'validation failed: ' + msgs.join('; ');
+    return;
+  }
+
+  // If pipeline has variables, show modal to set values
+  if ((config.variables || []).length > 0) {
+    openRunVarsModal(config);
+    return;
+  }
+
+  doRunPipeline(config);
+}
+
+async function doRunPipeline(config) {
   try {
     const res = await fetch('/api/run', {
       method: 'POST',
@@ -924,12 +1051,83 @@ async function stopRun() {
 }
 
 function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(pollStatus, 1000);
+  stopPolling();
+  // Try SSE first, fall back to polling
+  try {
+    eventSource = new EventSource('/api/run/'+currentRunId+'/events');
+    eventSource.onmessage = function(e) {
+      try {
+        const statuses = JSON.parse(e.data);
+        applyStatuses(statuses);
+      } catch(_) {}
+    };
+    eventSource.onerror = function() {
+      // SSE failed, fall back to polling
+      if (eventSource) { eventSource.close(); eventSource = null; }
+      if (!pollTimer) pollTimer = setInterval(pollStatus, 1000);
+    };
+  } catch(_) {
+    pollTimer = setInterval(pollStatus, 1000);
+  }
 }
 
 function stopPolling() {
+  if (eventSource) { eventSource.close(); eventSource = null; }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function applyStatuses(statuses) {
+  let allDone = true;
+  let waitingNode = null;
+
+  Object.keys(statuses).forEach(nodeId => {
+    const s = statuses[nodeId];
+    const el = document.getElementById('ns-'+nodeId);
+    if (el) {
+      let cls = 's-'+s.status;
+      let text = s.status;
+      if (s.status === 'running') text += ' ' + s.elapsed + 's';
+      if (s.review_round) text += ' (review round ' + s.review_round + ')';
+      if (s.retry_attempt) text += ' (retry ' + s.retry_attempt + ')';
+      if (s.message) text += ' \u2014 ' + s.message;
+      el.className = 'node-status ' + cls;
+      el.innerHTML = esc(text);
+      if (s.status === 'error' && currentRunId) {
+        el.innerHTML += ' <button class="node-retry-btn" onclick="retryNode(\''+esc(nodeId)+'\')">Retry</button>';
+      }
+    }
+
+    // Pulse effect for waiting nodes
+    const dfId = getDfIdByNodeId(nodeId);
+    if (dfId) {
+      const nodeEl = canvasEl.querySelector('#node-'+dfId);
+      if (nodeEl) {
+        if (s.status === 'waiting_for_input') nodeEl.classList.add('node-waiting');
+        else nodeEl.classList.remove('node-waiting');
+      }
+    }
+
+    if (s.status === 'waiting_for_input' && s.questions && s.questions.length > 0) {
+      waitingNode = {nodeId, questions: s.questions, round: s.question_round};
+    }
+    if (s.status !== 'done' && s.status !== 'error' && s.status !== 'idle') allDone = false;
+  });
+
+  if (waitingNode) {
+    showQuestionForm(waitingNode.nodeId, waitingNode.questions, waitingNode.round);
+  }
+
+  if (allDone && Object.keys(statuses).length > 0) {
+    stopPolling();
+    document.getElementById('btn-run').innerHTML = '\u25B6 Run';
+    document.getElementById('btn-run').className = 'btn-run';
+    document.getElementById('btn-run').onclick = runPipeline;
+    const hasErrors = Object.values(statuses).some(s => s.status === 'error');
+    const statusText = hasErrors ? 'done (with errors)' : 'done';
+    document.getElementById('run-status').textContent = statusText;
+    showNotification('clor — pipeline ' + statusText,
+      hasErrors ? 'Some nodes failed. Check the results.' : 'Pipeline completed successfully.');
+  }
 }
 
 async function pollStatus() {
@@ -937,49 +1135,7 @@ async function pollStatus() {
   try {
     const res = await fetch('/api/run/'+currentRunId+'/status');
     const statuses = await res.json();
-    let allDone = true;
-    let waitingNode = null;
-
-    Object.keys(statuses).forEach(nodeId => {
-      const s = statuses[nodeId];
-      const el = document.getElementById('ns-'+nodeId);
-      if (el) {
-        let cls = 's-'+s.status;
-        let text = s.status;
-        if (s.status === 'running') text += ' ' + s.elapsed + 's';
-        if (s.message) text += ' — ' + s.message;
-        el.className = 'node-status ' + cls;
-        el.textContent = text;
-      }
-
-      // Pulse effect for waiting nodes
-      const dfId = getDfIdByNodeId(nodeId);
-      if (dfId) {
-        const nodeEl = canvasEl.querySelector('#node-'+dfId);
-        if (nodeEl) {
-          if (s.status === 'waiting_for_input') nodeEl.classList.add('node-waiting');
-          else nodeEl.classList.remove('node-waiting');
-        }
-      }
-
-      if (s.status === 'waiting_for_input' && s.questions && s.questions.length > 0) {
-        waitingNode = {nodeId, questions: s.questions, round: s.question_round};
-      }
-      if (s.status !== 'done' && s.status !== 'error' && s.status !== 'idle') allDone = false;
-    });
-
-    // Show question form in log panel if a node is waiting
-    if (waitingNode) {
-      showQuestionForm(waitingNode.nodeId, waitingNode.questions, waitingNode.round);
-    }
-
-    if (allDone && Object.keys(statuses).length > 0) {
-      stopPolling();
-      document.getElementById('btn-run').innerHTML = '\u25B6 Run';
-      document.getElementById('btn-run').className = 'btn-run';
-      document.getElementById('btn-run').onclick = runPipeline;
-      document.getElementById('run-status').textContent = 'done';
-    }
+    applyStatuses(statuses);
   } catch(_) {}
 }
 
@@ -1037,20 +1193,67 @@ async function submitAnswers(nodeId, questions) {
   }
 }
 
+// ── RETRY NODE ─────────────────────────────
+async function retryNode(nodeId) {
+  if (!currentRunId) return;
+  try {
+    await fetch('/api/run/'+currentRunId+'/retry/'+encodeURIComponent(nodeId), {method:'POST'});
+    document.getElementById('run-status').textContent = 'retrying: ' + nodeId;
+  } catch(err) {
+    document.getElementById('run-status').textContent = 'retry error: ' + err.message;
+  }
+}
+
 // ── LOG VIEWER ─────────────────────────────
+let logEventSource = null;
+
 function toggleLogs() {
   document.getElementById('log-viewer').classList.toggle('hidden');
   document.getElementById('rh-logs').classList.toggle('hidden');
   if (!document.getElementById('log-viewer').classList.contains('hidden') && selectedNodeId) {
     loadNodeLog(selectedNodeId);
+  } else {
+    closeLogStream();
   }
+}
+
+function closeLogStream() {
+  if (logEventSource) { logEventSource.close(); logEventSource = null; }
 }
 
 async function loadNodeLog(dfId) {
   if (!currentRunId) return;
+  closeLogStream();
   const info = editor.getNodeFromId(dfId);
   if (!info) return;
   const nodeId = info.data.nodeId;
+
+  // Check if node is running — try SSE stream
+  const statusEl = document.getElementById('ns-'+nodeId);
+  const isRunning = statusEl && statusEl.textContent.includes('running');
+
+  if (isRunning) {
+    try {
+      logEventSource = new EventSource('/api/run/'+currentRunId+'/logs/'+encodeURIComponent(nodeId)+'/stream');
+      const logViewer = document.getElementById('log-viewer');
+      logViewer.textContent = '';
+      logEventSource.onmessage = function(e) {
+        logViewer.textContent += e.data.replace(/\\n/g, '\n');
+        logViewer.scrollTop = logViewer.scrollHeight;
+      };
+      logEventSource.onerror = function() {
+        closeLogStream();
+        // Fall back to fetching full log
+        fetchFullLog(nodeId);
+      };
+      return;
+    } catch(_) {}
+  }
+
+  fetchFullLog(nodeId);
+}
+
+async function fetchFullLog(nodeId) {
   try {
     const res = await fetch('/api/run/'+currentRunId+'/logs/'+encodeURIComponent(nodeId));
     const data = await res.json();
@@ -1078,6 +1281,7 @@ function importJSON() {
       editor.clear();
       nodeCounter = 0;
       document.getElementById('pipeline-name').value = config.name || 'imported';
+      pipelineVariables = config.variables || [];
 
       const idToDF = {};
       (config.nodes||[]).forEach(n => {
@@ -1097,6 +1301,9 @@ function importJSON() {
           tempFiles: n.config.temp_files || [],
           interactive: n.config.interactive || false,
           maxQuestionRounds: n.config.max_question_rounds || 3,
+          maxRetries: n.config.max_retries || 0,
+          retryDelaySeconds: n.config.retry_delay_seconds || 0,
+          reviewerFor: n.config.reviewer_for || '',
           projectId: pIds[0] || '',
           projectIds: pIds,
           nodeId: n.id,
@@ -1191,6 +1398,16 @@ document.addEventListener('keydown', e => {
     }
   }
 
+  // Ctrl+Z — undo, Ctrl+Shift+Z — redo
+  if (e.ctrlKey && e.key === 'z' && !e.shiftKey && !inInput) {
+    e.preventDefault();
+    undo();
+  }
+  if (e.ctrlKey && e.key === 'Z' && e.shiftKey && !inInput) {
+    e.preventDefault();
+    redo();
+  }
+
   // Escape — deselect / close panels
   if (e.key === 'Escape') {
     if (!inInput) {
@@ -1201,6 +1418,8 @@ document.addEventListener('keydown', e => {
     document.getElementById('log-viewer').classList.add('hidden');
     document.getElementById('rh-logs').classList.add('hidden');
     document.getElementById('project-modal').classList.add('hidden');
+    document.getElementById('variables-modal').classList.add('hidden');
+    document.getElementById('run-vars-modal').classList.add('hidden');
   }
 
   // Ctrl+E — export
@@ -1251,7 +1470,191 @@ initResize('rh-sidebar', document.getElementById('sidebar'), 'width', 120, 400, 
 initResize('rh-config', document.getElementById('config-panel'), 'width', 200, 600, 'h');
 initResize('rh-logs', document.getElementById('log-viewer'), 'height', 80, 500, 'v');
 
+// ── HELPER: get all node IDs/labels ────────
+function getAllNodeIds() {
+  const exp = editor.export();
+  const mod = exp.drawflow.Home.data;
+  return Object.keys(mod).map(dfId => ({
+    nodeId: mod[dfId].data.nodeId,
+    label: mod[dfId].data.label || mod[dfId].data.nodeId
+  }));
+}
+
+// ── PIPELINE VARIABLES ─────────────────────
+function openVariablesModal() {
+  document.getElementById('variables-modal').classList.remove('hidden');
+  renderModalVars();
+}
+
+function closeVariablesModal() {
+  document.getElementById('variables-modal').classList.add('hidden');
+}
+
+function renderModalVars() {
+  const container = document.getElementById('modal-var-list');
+  container.innerHTML = '';
+  pipelineVariables.forEach((v, i) => {
+    container.innerHTML += '<div class="var-row">' +
+      '<input placeholder="name" value="'+esc(v.name||'')+'" data-idx="'+i+'" class="mv-name" style="width:100px" />' +
+      '<input placeholder="default" value="'+esc(v.default||'')+'" data-idx="'+i+'" class="mv-default" />' +
+      '<input placeholder="description" value="'+esc(v.description||'')+'" data-idx="'+i+'" class="mv-desc" />' +
+      '<button onclick="pipelineVariables.splice('+i+',1);renderModalVars()" style="color:var(--red);border:none;background:none">x</button>' +
+      '</div>';
+  });
+}
+
+function addVariableRow() {
+  pipelineVariables.push({name:'', default:'', description:''});
+  renderModalVars();
+}
+
+function saveVariables() {
+  document.querySelectorAll('.mv-name').forEach(el => { pipelineVariables[+el.dataset.idx].name = el.value; });
+  document.querySelectorAll('.mv-default').forEach(el => { pipelineVariables[+el.dataset.idx].default = el.value; });
+  document.querySelectorAll('.mv-desc').forEach(el => { pipelineVariables[+el.dataset.idx].description = el.value; });
+  pipelineVariables = pipelineVariables.filter(v => v.name.trim());
+  closeVariablesModal();
+}
+
+function openRunVarsModal(config) {
+  const vars = config.variables || [];
+  if (vars.length === 0) {
+    doRunPipeline(config);
+    return;
+  }
+  const container = document.getElementById('modal-run-vars');
+  container.innerHTML = '';
+  vars.forEach((v, i) => {
+    container.innerHTML += '<div style="margin-bottom:6px">' +
+      '<label>'+esc(v.name)+(v.description?' — <span style="color:var(--text3)">'+esc(v.description)+'</span>':'')+'</label>' +
+      '<input id="rv-'+i+'" value="'+esc(v.default||'')+'" placeholder="'+esc(v.name)+'" />' +
+      '</div>';
+  });
+  document.getElementById('run-vars-modal').classList.remove('hidden');
+  window._pendingRunConfig = config;
+}
+
+function closeRunVarsModal() {
+  document.getElementById('run-vars-modal').classList.add('hidden');
+  window._pendingRunConfig = null;
+}
+
+function confirmRunWithVars() {
+  const config = window._pendingRunConfig;
+  if (!config) return;
+  const values = {};
+  (config.variables || []).forEach((v, i) => {
+    const el = document.getElementById('rv-'+i);
+    values[v.name] = el ? el.value : v.default || '';
+  });
+  config.var_values = values;
+  closeRunVarsModal();
+  doRunPipeline(config);
+}
+
+// ── UNDO / REDO ────────────────────────────
+function saveUndoState() {
+  const state = editor.export();
+  undoStack.push(JSON.stringify(state));
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack = [];
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  const current = JSON.stringify(editor.export());
+  redoStack.push(current);
+  const prev = undoStack.pop();
+  editor.import(JSON.parse(prev));
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  const current = JSON.stringify(editor.export());
+  undoStack.push(current);
+  const next = redoStack.pop();
+  editor.import(JSON.parse(next));
+}
+
+// Save state on node add/remove/move and connection changes
+['nodeCreated','nodeRemoved','connectionCreated','connectionRemoved','nodeMoved'].forEach(evt => {
+  editor.on(evt, () => saveUndoState());
+});
+
+// ── AUTO-LAYOUT ────────────────────────────
+function autoLayout() {
+  const config = buildPipelineJSON();
+  if (!config.nodes.length) return;
+
+  // Build adjacency for topological sort
+  const inDegree = {};
+  const dependsOn = {};
+  config.nodes.forEach(n => { inDegree[n.id] = 0; dependsOn[n.id] = {}; });
+  config.edges.forEach(e => { inDegree[e.target]++; dependsOn[e.target][e.source] = true; });
+
+  const done = {};
+  const waves = [];
+  const ids = config.nodes.map(n => n.id);
+
+  while (Object.keys(done).length < ids.length) {
+    const wave = [];
+    ids.forEach(id => {
+      if (done[id]) return;
+      let ready = true;
+      Object.keys(dependsOn[id]||{}).forEach(dep => { if (!done[dep]) ready = false; });
+      if (ready) wave.push(id);
+    });
+    if (wave.length === 0) break;
+    waves.push(wave);
+    wave.forEach(id => done[id] = true);
+  }
+
+  saveUndoState();
+
+  const WAVE_GAP = 280;
+  const NODE_GAP = 120;
+  const START_X = 80;
+  const START_Y = 80;
+
+  waves.forEach((wave, wi) => {
+    const totalHeight = wave.length * NODE_GAP;
+    const offsetY = START_Y + (wave.length > 1 ? 0 : totalHeight / 4);
+    wave.forEach((nodeId, ni) => {
+      const dfId = getDfIdByNodeId(nodeId);
+      if (!dfId) return;
+      const x = START_X + wi * WAVE_GAP;
+      const y = offsetY + ni * NODE_GAP;
+      const el = canvasEl.querySelector('#node-'+dfId);
+      if (el) {
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        const info = editor.drawflow.drawflow.Home.data[dfId];
+        if (info) { info.pos_x = x; info.pos_y = y; }
+        editor.updateConnectionNodes('node-'+dfId);
+      }
+    });
+  });
+}
+
+// ── BROWSER NOTIFICATIONS ──────────────────
+let notificationsEnabled = false;
+
+function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    notificationsEnabled = true;
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then(p => { notificationsEnabled = p === 'granted'; });
+  }
+}
+
+function showNotification(title, body) {
+  if (!notificationsEnabled || document.hasFocus()) return;
+  try { new Notification(title, {body, icon: ''}); } catch(_) {}
+}
+
 // ── INIT ───────────────────────────────────
+requestNotificationPermission();
 loadProjectsFromServer();
 loadPipelineList();
 </script>
