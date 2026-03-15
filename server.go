@@ -62,6 +62,9 @@ func setupRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/runs", handleListRuns)
 	mux.HandleFunc("DELETE /api/runs/{id}", handleDeleteRun)
 
+	// Default prompts
+	mux.HandleFunc("GET /api/prompts", handleGetPrompts)
+
 	return mux
 }
 
@@ -570,4 +573,29 @@ func handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Default Prompts ─────────────────────────
+
+func handleGetPrompts(w http.ResponseWriter, r *http.Request) {
+	entries, err := promptsFS.ReadDir("prompts")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{})
+		return
+	}
+	result := make(map[string]string)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		data, err := promptsFS.ReadFile("prompts/" + e.Name())
+		if err != nil {
+			continue
+		}
+		key := strings.TrimSuffix(e.Name(), ".md")
+		result[key] = string(data)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }

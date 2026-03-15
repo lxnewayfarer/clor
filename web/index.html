@@ -143,7 +143,7 @@ footer{display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(-
 .node-play-btn{position:absolute;top:4px;right:22px;background:none;border:none;color:var(--green);font-size:11px;padding:2px 5px;cursor:pointer;opacity:0;transition:opacity .15s}
 .node-play-btn:hover{background:var(--green)18;border-radius:3px}
 .drawflow-node:hover .node-delete-btn,.drawflow-node:hover .node-play-btn{opacity:1}
-.s-running{color:var(--amber)}.s-done{color:var(--green)}.s-error{color:var(--red)}.s-queued{color:var(--text3)}.s-waiting_for_input{color:var(--purple)}
+.s-running{color:var(--amber)}.s-done{color:var(--green)}.s-error{color:var(--red)}.s-queued{color:var(--text3)}.s-waiting_for_input{color:var(--purple)}.s-stopped{color:var(--text3)}
 @keyframes pulse-purple{0%,100%{border-color:var(--border)}50%{border-color:var(--purple)}}
 .node-waiting{animation:pulse-purple 2s ease-in-out infinite}
 
@@ -440,15 +440,21 @@ let activeTabNodeId = null;
 let userSelectedTab = false; // true once user manually clicks a tab; reset on pipeline start
 let layoutMode = 'horizontal'; // 'horizontal' | 'vertical' | 'auto'
 
+let defaultPrompts = {};
 const PRESETS = [
-  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],tempFiles:['plan.md'],prompt:'You are a system architect. Analyze {task} and produce a detailed implementation plan.\n\nIf anything is unclear or ambiguous about the task, output a "## Questions" section with a numbered list of questions BEFORE producing the plan. Example:\n\n## Questions\n1. Should we support both PostgreSQL and SQLite?\n2. What is the expected request rate for the API?\n\nOnce you have enough clarity (or if the task is already clear), your output MUST contain a "## Subtasks" section with a numbered list of independent, self-contained subtasks that downstream agents (coder, tester) will execute in parallel. Each subtask should be a clear, actionable description — one line per subtask.\n\nExample format:\n\n## Subtasks\n1. Refactor auth middleware to use JWT validation\n2. Add rate-limiting to /api/upload endpoint\n3. Update User model with email verification fields\n\nBefore the subtasks section, include any shared context, architectural decisions, or constraints that all subtasks depend on. Write the full plan to plan.md.'},
-  {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],prompt:'You are a CODER agent. Implement the following change:\n\n{subtask}\n\nContext from the architect plan: {read:plan.md}\n\nFull task description: {task}\n\nFocus only on your assigned subtask. Do not modify code unrelated to it.'},
-  {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],prompt:'You are a TESTER agent. Write and run tests for the following change:\n\n{subtask}\n\nFull task description: {task}\n\nFocus only on testing your assigned subtask. Ensure all tests pass before finishing.'},
-  {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],prompt:'You are a code reviewer. Review all changes for {task}. Write review.md with: Review Status: PASS or FAIL.'},
-  {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],prompt:'Summarize what was built for {task}. Read all changed files and produce a final report.'},
-  {type:'agent',icon:'\u{1F4E6}',label:'Committer',tools:['Bash'],prompt:'You are a git committer agent. Stage all changes, create a descriptive commit message based on {task}, commit and push to the current branch.\n\nRun:\ngit add -A\ngit commit -m "<descriptive message based on the task>"\ngit push'},
+  {type:'agent',icon:'\u{1F4CB}',label:'Architect',tools:['Read','Write','Edit','Glob','Bash'],tempFiles:['plan.md'],promptKey:'architect'},
+  {type:'agent',icon:'\u{1F4BB}',label:'Coder',tools:['Read','Write','Edit','Bash'],promptKey:'coder'},
+  {type:'agent',icon:'\u{1F9EA}',label:'Tester',tools:['Read','Write','Edit','Bash'],promptKey:'tester'},
+  {type:'agent',icon:'\u{25B6}',label:'Runner',tools:['Read','Write','Edit','Bash','Glob','Grep'],promptKey:'runner'},
+  {type:'agent',icon:'\u{1F50D}',label:'Reviewer',tools:['Read','Write','Edit','Bash','Glob','Grep'],promptKey:'reviewer'},
+  {type:'agent',icon:'\u{1F4DD}',label:'Reporter',tools:['Read','Write'],promptKey:'reporter'},
+  {type:'agent',icon:'\u{1F4E6}',label:'Committer',tools:['Bash'],promptKey:'committer'},
   {type:'task',icon:'\u{1F4CC}',label:'Task'},
 ];
+function getPresetPrompt(preset) {
+  if (!preset.promptKey) return '';
+  return defaultPrompts[preset.promptKey] || '';
+}
 const ALL_TOOLS = ['Read','Write','Edit','Bash','Glob','Grep'];
 
 // ── DRAWFLOW INIT ──────────────────────────
@@ -476,9 +482,9 @@ function nodeHTML(data) {
   const delBtn = '<button class="node-delete-btn" onclick="deleteNodeBtn(\''+data.nodeId+'\',event)" title="Delete node">&times;</button>';
   const playBtn = data.type !== 'task' ? '<button class="node-play-btn" onclick="runFromNode(\''+data.nodeId+'\',event)" title="Run from here">&#9654;</button>' : '';
 
-  if (data.type === 'task') return '<div class="node-inner'+noProjClass+'" style="border-left:3px solid var(--green)">' + delBtn +
+  if (data.type === 'task') return '<div class="node-inner" style="border-left:3px solid var(--green)">' + delBtn +
     '<div class="node-header"><span class="node-icon">\u{1F4CC}</span><span class="node-label">'+(data.label||'Task')+'</span></div>' +
-    '<div class="node-desc">'+(data.text||'click to edit').slice(0,80)+'</div><div class="node-projects">'+pills+'</div>'+status+'</div>';
+    '<div class="node-desc">'+(data.text||'click to edit').slice(0,80)+'</div>'+status+'</div>';
 
   return '<div class="node-inner'+noProjClass+'" style="border-left:3px solid '+pc+'">' + playBtn + delBtn +
     '<div class="node-header"><span class="node-icon">'+(data.icon||'\u2699\uFE0F')+'</span>' +
@@ -502,7 +508,7 @@ function toggleSubtaskList(nodeId) {
 function addNode(preset, posX, posY) {
   nodeCounter++;
   const id = preset.type + '_' + nodeCounter;
-  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectIds:[], projectColor:'', projectAlias:'', model: preset.model || 'claude-sonnet-4-6'});
+  const data = Object.assign({}, preset, {nodeId: id, projectId:'', projectIds:[], projectColor:'', projectAlias:'', model: preset.model || 'claude-sonnet-4-6', prompt: getPresetPrompt(preset)});
   if (preset.description) data.description = preset.description;
   // Auto-assign project if exactly one exists
   if (projects.length === 1) {
@@ -1378,9 +1384,20 @@ async function runFromNode(nodeId, event) {
 
 async function stopRun() {
   if (currentRunId) {
-    await fetch('/api/run/'+currentRunId+'/stop', {method:'POST'});
+    try { await fetch('/api/run/'+currentRunId+'/stop', {method:'POST'}); } catch(_) {}
   }
   stopPolling();
+  currentRunId = null;
+  activeQuestionNodeId = null;
+  // Reset all node status indicators
+  document.querySelectorAll('.node-status').forEach(el => {
+    el.className = 'node-status';
+    el.innerHTML = '';
+  });
+  // Reset subtask progress bars
+  document.querySelectorAll('[id^="sp-"]').forEach(el => { el.style.display = 'none'; });
+  // Remove waiting pulse from canvas nodes
+  document.querySelectorAll('.node-waiting').forEach(el => el.classList.remove('node-waiting'));
   document.getElementById('btn-run').innerHTML = '\u25B6 Run';
   document.getElementById('btn-run').className = 'btn-run';
   document.getElementById('btn-run').onclick = runPipeline;
@@ -1435,6 +1452,8 @@ function applyStatuses(statuses) {
         icon = '<span style="color:var(--red)">✗</span> ';
       } else if (s.status === 'waiting_for_input') {
         icon = '<span style="color:var(--purple)">◉</span> ';
+      } else if (s.status === 'stopped') {
+        icon = '<span style="color:var(--text3)">■</span> ';
       } else if (s.status === 'queued' || s.status === 'pending') {
         icon = '<span style="color:var(--text3)">○</span> ';
       }
@@ -1534,7 +1553,7 @@ function applyStatuses(statuses) {
     if (s.status === 'waiting_for_input' && s.questions && s.questions.length > 0) {
       waitingNode = {nodeId, label: s.label, questions: s.questions, round: s.question_round};
     }
-    if (s.status !== 'done' && s.status !== 'error') allDone = false;
+    if (s.status !== 'done' && s.status !== 'error' && s.status !== 'stopped') allDone = false;
   });
 
   if (waitingNode) {
@@ -1647,9 +1666,10 @@ function showQuestionForm(nodeId, label, questions, round) {
     html += '<input type="text" id="qa-'+q.id+'" placeholder="Your answer..." />';
     html += '</div>';
   });
-  html += '<button onclick="submitAnswers(\''+esc(nodeId)+'\','+JSON.stringify(questions).replace(/'/g,"\\'")+')">Submit Answers</button>';
+  html += '<button id="qa-submit-btn">Submit Answers</button>';
   html += '</div>';
   tab.el.innerHTML = html;
+  document.getElementById('qa-submit-btn').addEventListener('click', () => submitAnswers(nodeId, questions));
 }
 
 async function submitAnswers(nodeId, questions) {
@@ -2667,6 +2687,7 @@ function showNotification(title, body) {
 }
 
 // ── INIT ───────────────────────────────────
+fetch('/api/prompts').then(r=>r.json()).then(p=>{defaultPrompts=p||{}}).catch(()=>{});
 requestNotificationPermission();
 loadProjectsFromServer();
 loadPipelineList();

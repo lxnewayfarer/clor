@@ -19,6 +19,9 @@ import (
 //go:embed web/index.html
 var content embed.FS
 
+//go:embed prompts/*.md
+var promptsFS embed.FS
+
 const version = "0.1.0"
 
 func main() {

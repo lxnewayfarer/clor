@@ -102,6 +102,30 @@ func (o *Orchestrator) Run(ctx context.Context) {
 		}
 	}
 
+	// Mark all non-terminal nodes as stopped when cancelled
+	if ctx.Err() != nil {
+		o.mu.Lock()
+		for id, ns := range o.statuses {
+			if ns.Status == "running" || ns.Status == "queued" || ns.Status == "waiting_for_input" || ns.Status == "idle" {
+				ns.Status = "stopped"
+				ns.Message = "Run cancelled"
+				o.statuses[id] = ns
+			}
+		}
+		data, _ := json.MarshalIndent(o.statuses, "", "  ")
+		os.WriteFile(filepath.Join(o.runDir, "status.json"), data, 0644)
+		o.broadcast()
+		o.mu.Unlock()
+	}
+
+	// Close all remaining log streams
+	o.mu.Lock()
+	for id, ls := range o.logStreams {
+		ls.Close()
+		delete(o.logStreams, id)
+	}
+	o.mu.Unlock()
+
 	o.cleanupTempFiles()
 }
 

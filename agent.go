@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -94,6 +95,10 @@ func runAgent(ctx context.Context, prompt string, tools []string, workdir string
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = workdir
 	cmd.Stdin = bytes.NewBufferString(prompt)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

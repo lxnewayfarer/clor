@@ -1,0 +1,1 @@
+Summarize what was built for {task}. Read all changed files and produce a final report.
